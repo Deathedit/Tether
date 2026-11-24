@@ -79,8 +79,8 @@ branding. "Works with PS5" as plain text is fine.
 |---|---|
 | Protocol | `chiaki-sys` (our crate: `cmake` + `bindgen` on chiaki-ng `lib/`, git submodule pinned to a release tag) |
 | Safe API | `rp-core` (our crate): `Discovery`, `wake()`, `register(pin)`, `Session` with events on `crossbeam-channel` |
-| Audio out | `opus` (libopus) decode → `cpal` (WASAPI on Windows, ALSA/PipeWire on Linux, AAudio on Android) |
-| Mic | `cpal` input → `opus` encode |
+| Audio out | chiaki hands over raw Opus frames; `opus` (libopus, built from source by its crate) decodes them on chiaki's thread into a small jitter buffer (30 ms default) drained by `cpal` (WASAPI on Windows, ALSA/PipeWire on Linux, AAudio on Android) |
+| Mic | `cpal` input → `opus` encode (48 kHz stereo, CBR so every 10 ms packet is exactly the 40 bytes chiaki's audio sender accepts) → chiaki's audio sender |
 | Config | `serde` + `toml`, `directories` (desktop) / app files dir passed in (Android) |
 | Secrets | `keyring` on desktop; Android Keystore through the Kotlin side |
 | Logging / errors | `tracing` (+ `tracing-android` on Android), `thiserror`, `anyhow` |
@@ -93,9 +93,9 @@ branding. "Works with PS5" as plain text is fine.
 | UI | **Slint**, using its wgpu integration to show the video texture |
 | Video decode | `ffmpeg-next` (FFmpeg 7.x): VAAPI on Linux, D3D11VA on Windows, software fallback |
 | Video render | `wgpu`, NV12 → RGB shader (Vulkan / D3D12) |
-| Controllers | `sdl3` crate: DualSense rumble, gyro, touchpad, lightbar |
-| Packaging | AppImage (Linux); zip or MSI with `cargo-wix` (Windows), FFmpeg, SDL3 and libopus DLLs bundled |
-| Native deps | Linux: system packages via pkg-config (Nix flake dev shell, or Arch packages). Windows: vcpkg (`vcpkg.json`, triplet `x64-windows-static-md`) |
+| Controllers | `sdl3` crate on its own thread (gamepad subsystem only; winit keeps the window): buttons, sticks, triggers, touchpad, gyro → chiaki's controller state on every change; rumble, adaptive triggers, light bar, player LEDs back. DualSense haptics (an audio stream) are turned into rumble for now; playing them on the controller's audio interface is a TODO |
+| Packaging | AppImage (Linux); zip or MSI with `cargo-wix` (Windows); FFmpeg, SDL3 and libopus are linked statically on Windows |
+| Native deps | Linux: system packages via pkg-config (Nix flake dev shell, or Arch packages). Windows: vcpkg (`vcpkg.json`, triplet `x64-windows-static-md`), except SDL3, which its crate builds from source. libopus is always built from source by its crate |
 | C toolchain (Windows) | chiaki-ng's C code is compiled with **clang-cl** + Ninja: it uses C99 variable-length arrays that MSVC's `cl.exe` rejects (upstream builds Windows with MinGW). clang-cl still emits MSVC-ABI objects, so Rust stays on `x86_64-pc-windows-msvc` |
 
 ### Android app (AYN Thor first)

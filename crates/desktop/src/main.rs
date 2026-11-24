@@ -1,6 +1,8 @@
 //! `tether`: desktop entry point. For now a CLI; the Slint UI arrives in
 //! milestone 5.
 
+mod input;
+mod play;
 mod stream;
 mod video;
 mod window;
@@ -105,6 +107,20 @@ enum Command {
         /// Video codec
         #[arg(long, value_enum, default_value_t = CodecArg::H264)]
         codec: CodecArg,
+
+        /// Don't play the console's sound
+        #[arg(long)]
+        no_audio: bool,
+
+        /// Audio buffering in milliseconds: lower is less delay, higher survives a
+        /// jittery network without gaps
+        #[arg(long, default_value_t = 30, value_parser = clap::value_parser!(u32).range(0..=500))]
+        audio_buffer: u32,
+
+        /// Send the microphone from the start (otherwise the controller's mute
+        /// button switches it on and off)
+        #[arg(long)]
+        mic: bool,
     },
 }
 
@@ -190,6 +206,9 @@ fn run(command: Command) -> Result<()> {
             resolution,
             fps,
             codec,
+            no_audio,
+            audio_buffer,
+            mic,
         } => stream::run(
             &console,
             stream::StreamOptions {
@@ -203,6 +222,11 @@ fn run(command: Command) -> Result<()> {
                 codec: match codec {
                     CodecArg::H264 => Codec::H264,
                     CodecArg::H265 => Codec::H265,
+                },
+                play: play::PlayOptions {
+                    audio: !no_audio,
+                    audio_buffer_ms: audio_buffer,
+                    mic,
                 },
             },
         ),

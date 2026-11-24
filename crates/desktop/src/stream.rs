@@ -8,6 +8,7 @@ use anyhow::{Context, Result, bail};
 use rp_core::{Codec, Resolution, Session, SessionConfig, SessionEvent, VideoProfile, VideoSample};
 use tether_core::{Store, WakeProgress};
 
+use crate::play::{Play, PlayOptions};
 use crate::video::{self, EncodedFrame, Shared};
 use crate::window::{UserEvent, VideoWindow};
 
@@ -15,6 +16,7 @@ pub struct StreamOptions {
     pub resolution: Resolution,
     pub fps: u32,
     pub codec: Codec,
+    pub play: PlayOptions,
 }
 
 pub fn run(query: &str, opts: StreamOptions) -> Result<()> {
@@ -88,8 +90,11 @@ pub fn run(query: &str, opts: StreamOptions) -> Result<()> {
             })
             .is_ok()
     });
-    let (session, events) = Session::start(&config, sink)?;
+    let mut play = Play::new(&opts.play);
+    let (session, events) = Session::start_with(&config, play.sinks(sink))?;
     let session = Arc::new(session);
+    // Sound, controllers, rumble and microphone.
+    let events = play.attach(session.clone(), events);
 
     // Session events: login PIN prompt, quit -> close the window.
     let event_thread = {
@@ -134,6 +139,7 @@ pub fn run(query: &str, opts: StreamOptions) -> Result<()> {
     // Window closed (by the user or because the session ended).
     session.stop();
     let quit = event_thread.join().ok().flatten();
+    play.stop();
     // Dropping the last session handle joins chiaki and closes the frame
     // channel, which ends the decoder thread.
     drop(session);

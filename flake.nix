@@ -37,10 +37,15 @@
             miniupnpc
             libevent
             ffmpeg
+            # Gamepads (SDL3) and sound (cpal uses ALSA, which PipeWire and
+            # PulseAudio serve). libopus is built from source by the opus crate.
+            sdl3
+            alsa-lib
           ];
 
           # winit and softbuffer load these at runtime (dlopen) rather than
           # linking them, so they must be findable when `tether stream` runs.
+          # SDL3 dlopens libudev to find controllers.
           LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath (
             with pkgs;
             [
@@ -50,6 +55,7 @@
               xorg.libXcursor
               xorg.libXrandr
               xorg.libXi
+              udev
             ]
           );
         };
