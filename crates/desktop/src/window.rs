@@ -107,7 +107,13 @@ impl ApplicationHandler<UserEvent> for App {
                     w.request_redraw();
                 }
             }
-            WindowEvent::RedrawRequested => self.draw(),
+            WindowEvent::RedrawRequested => {
+                // Clear first: a frame decoded while drawing posts a new wake-up.
+                self.shared
+                    .redraw_pending
+                    .store(false, std::sync::atomic::Ordering::Release);
+                self.draw();
+            }
             _ => {}
         }
     }

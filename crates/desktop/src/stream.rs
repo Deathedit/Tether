@@ -113,6 +113,7 @@ pub fn run(query: &str, opts: StreamOptions) -> Result<()> {
                                 }
                             }
                             Ok(SessionEvent::Quit { reason, error }) => {
+                                tracing::info!("session quit: {reason}");
                                 quit = Some((reason, error));
                                 let _ = proxy.send_event(UserEvent::SessionEnded);
                                 break;
@@ -129,20 +130,28 @@ pub fn run(query: &str, opts: StreamOptions) -> Result<()> {
 
     let title = format!("Tether - {}", paired.name);
     let close_session = session.clone();
-    window.run(title, shared, move || close_session.stop())?;
+    window.run(title, shared, move || {
+        tracing::debug!("window closed; stopping session");
+        close_session.stop();
+    })?;
 
     // Window closed (by the user or because the session ended).
+    tracing::debug!("event loop finished");
     session.stop();
+    tracing::debug!("waiting for session events to end");
     let quit = event_thread.join().ok().flatten();
+    tracing::debug!("event thread done; joining session");
     // Dropping the last session handle joins chiaki and closes the frame
     // channel, which ends the decoder thread.
     drop(session);
+    tracing::debug!("session joined; waiting for decoder");
     let stats = decoder.join().ok();
 
     if let Some(stats) = stats {
         tracing::info!(
-            "decoded {} frames, {} decoder errors",
+            "decoded {} frames ({} skipped to catch up), {} decoder errors",
             stats.decoded,
+            stats.skipped,
             stats.errors
         );
     }

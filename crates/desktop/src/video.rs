@@ -4,6 +4,7 @@
 //! as packed 0RGB pixels, come out in a shared slot the window draws from.
 //! Milestone 5 replaces this with hardware decoding and a wgpu renderer.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
@@ -36,11 +37,16 @@ pub struct Shared {
     pub latest: Mutex<Option<RgbFrame>>,
     /// Window's inner size in pixels; frames are scaled to fit it.
     pub target: Mutex<(u32, u32)>,
+    /// Set when a frame was posted to the window and not drawn yet, so the
+    /// decoder sends at most one wake-up per drawn frame.
+    pub redraw_pending: AtomicBool,
 }
 
 #[derive(Default)]
 pub struct DecodeStats {
     pub decoded: u64,
+    /// Decoded but not shown because newer frames were already waiting.
+    pub skipped: u64,
     pub errors: u64,
 }
 
@@ -82,7 +88,7 @@ pub fn spawn_decoder(
             let mut decoded = ffmpeg::frame::Video::empty();
             let mut scaled = ffmpeg::frame::Video::empty();
 
-            for frame in frames {
+            while let Ok(frame) = frames.recv() {
                 if frame.frames_lost > 0 {
                     tracing::debug!("{} frames lost", frame.frames_lost);
                 }
@@ -94,6 +100,13 @@ pub fn spawn_decoder(
                 }
                 while decoder.receive_frame(&mut decoded).is_ok() {
                     stats.decoded += 1;
+                    // Every frame must be decoded (later frames reference it),
+                    // but if newer ones are already queued, showing this one
+                    // only adds delay: skip scaling and drawing it.
+                    if !frames.is_empty() {
+                        stats.skipped += 1;
+                        continue;
+                    }
                     let target = *shared.target.lock().unwrap();
                     let (dw, dh) = fit(decoded.width(), decoded.height(), target);
                     let key = (decoded.format(), decoded.width(), decoded.height(), dw, dh);
@@ -102,7 +115,9 @@ pub fn spawn_decoder(
                             key.0,
                             key.1,
                             key.2,
-                            Pixel::BGRA,
+                            // B,G,R,0 bytes = softbuffer's 0x00RRGGBB on
+                            // little-endian machines, so rows copy as-is.
+                            Pixel::BGRZ,
                             dw,
                             dh,
                             scaling::Flags::BILINEAR,
@@ -120,7 +135,9 @@ pub fn spawn_decoder(
                         continue;
                     }
                     *shared.latest.lock().unwrap() = Some(to_rgb_frame(&scaled, dw, dh));
-                    on_frame();
+                    if !shared.redraw_pending.swap(true, Ordering::AcqRel) {
+                        on_frame();
+                    }
                 }
             }
             stats
@@ -146,18 +163,20 @@ fn fit(src_w: u32, src_h: u32, target: (u32, u32)) -> (u32, u32) {
     (w.max(1), h.max(1))
 }
 
-/// Copies a BGRA frame (rows may be padded) into packed 0RGB pixels.
+/// Copies a BGR0 frame (rows may be padded) into packed 0RGB pixels.
 fn to_rgb_frame(frame: &ffmpeg::frame::Video, w: u32, h: u32) -> RgbFrame {
     let stride = frame.stride(0);
     let data = frame.data(0);
-    let mut pixels = Vec::with_capacity((w * h) as usize);
+    let row_bytes = w as usize * 4;
+    let mut pixels = vec![0u32; (w * h) as usize];
+    let dst: &mut [u8] = bytemuck::cast_slice_mut(&mut pixels);
     for row in 0..h as usize {
-        let line = &data[row * stride..row * stride + w as usize * 4];
-        // BGRA bytes read as a little-endian u32 are 0xAARRGGBB.
-        pixels.extend(
-            line.chunks_exact(4)
-                .map(|p| u32::from_le_bytes([p[0], p[1], p[2], 0])),
-        );
+        dst[row * row_bytes..][..row_bytes].copy_from_slice(&data[row * stride..][..row_bytes]);
+    }
+    if cfg!(target_endian = "big") {
+        for p in &mut pixels {
+            *p = p.swap_bytes();
+        }
     }
     RgbFrame {
         width: w,
