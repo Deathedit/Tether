@@ -23,6 +23,7 @@ use tether_core::{
     settings::BITRATE_RANGE_KBPS,
 };
 
+use crate::play::PlayOptions;
 use crate::stream::{EventSink, Gpu, SharedGpu, Stream, StreamEvent, StreamRequest};
 use crate::video::Backend;
 use model::{ConnectProgress, RowState, StatsMeter};
@@ -38,9 +39,24 @@ pub struct Overrides {
     pub resolution: Option<VideoResolution>,
     pub fps: Option<u32>,
     pub codec: Option<VideoCodec>,
+    /// Don't play the console's sound.
+    pub no_audio: bool,
+    /// Audio jitter buffer; default 30 ms.
+    pub audio_buffer_ms: Option<u32>,
+    /// Start with the microphone on.
+    pub mic: bool,
 }
 
 impl Overrides {
+    /// Sound, microphone and controller options for a session.
+    fn play_options(self) -> PlayOptions {
+        PlayOptions {
+            audio: !self.no_audio,
+            audio_buffer_ms: self.audio_buffer_ms.unwrap_or(30),
+            mic: self.mic,
+        }
+    }
+
     fn apply(self, mut s: StreamSettings) -> StreamSettings {
         if let Some(r) = self.resolution {
             s.resolution = r;
@@ -675,6 +691,7 @@ impl App {
             secrets,
             account_id,
             settings,
+            play: self.overrides.play_options(),
         };
         let stream = match Stream::start(request, self.gpu.clone(), sink) {
             Ok(s) => s,

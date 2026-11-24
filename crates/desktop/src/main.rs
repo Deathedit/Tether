@@ -2,6 +2,8 @@
 //! the subcommands are a command-line interface to the same logic.
 
 mod app;
+mod input;
+mod play;
 mod stream;
 mod video;
 
@@ -110,6 +112,20 @@ enum Command {
         /// Video codec
         #[arg(long, value_enum)]
         codec: Option<CodecArg>,
+
+        /// Don't play the console's sound
+        #[arg(long)]
+        no_audio: bool,
+
+        /// Audio buffering in milliseconds: lower is less delay, higher survives a
+        /// jittery network without gaps
+        #[arg(long, default_value_t = 30, value_parser = clap::value_parser!(u32).range(0..=500))]
+        audio_buffer: u32,
+
+        /// Send the microphone from the start (otherwise the controller's mute
+        /// button switches it on and off)
+        #[arg(long)]
+        mic: bool,
     },
 }
 
@@ -198,6 +214,9 @@ fn run(command: Option<Command>) -> Result<()> {
             resolution,
             fps,
             codec,
+            no_audio,
+            audio_buffer,
+            mic,
         } => app::run(app::Options {
             stream: Some(console),
             overrides: app::Overrides {
@@ -212,6 +231,9 @@ fn run(command: Option<Command>) -> Result<()> {
                     CodecArg::H264 => VideoCodec::H264,
                     CodecArg::H265 => VideoCodec::H265,
                 }),
+                no_audio,
+                audio_buffer_ms: Some(audio_buffer),
+                mic,
             },
         }),
     }

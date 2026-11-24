@@ -31,3 +31,13 @@ ffmpeg-next.workspace = true
 # Windows: vcpkg's static FFmpeg, found through FFMPEG_DIR.
 [target.'cfg(windows)'.dependencies]
 ffmpeg-next = { workspace = true, features = ["static"] }
+
+# Gamepads: the system SDL3 on Linux; built from source and linked statically
+# on Windows.
+[target.'cfg(not(windows))'.dependencies.sdl3]
+workspace = true
+features = ["hidapi", "use-pkg-config"]
+
+[target.'cfg(windows)'.dependencies.sdl3]
+workspace = true
+features = ["build-from-source-static", "hidapi"]

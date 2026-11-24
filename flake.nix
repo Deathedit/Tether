@@ -40,12 +40,17 @@
             ffmpeg
             # Slint finds system fonts through fontconfig.
             fontconfig
+            # Gamepads (SDL3) and sound (cpal uses ALSA, which PipeWire and
+            # PulseAudio serve). libopus is built from source by the opus crate.
+            sdl3
+            alsa-lib
           ];
 
-          # The UI loads these at runtime (dlopen) rather than linking them:
-          # winit's Wayland/X11 libraries, the Vulkan loader for wgpu, and
-          # libva for hardware decoding. On NixOS the GPU drivers themselves
-          # (Vulkan ICDs, VAAPI drivers) come from `hardware.graphics`.
+          # Loaded at runtime (dlopen) rather than linked: winit's Wayland/X11
+          # libraries, the Vulkan loader for wgpu, libva for hardware decoding,
+          # and libudev, which SDL3 uses to find controllers. On NixOS the GPU
+          # drivers themselves (Vulkan ICDs, VAAPI drivers) come from
+          # `hardware.graphics`.
           LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath (
             with pkgs;
             [
@@ -59,6 +64,7 @@
               libva
               fontconfig
               freetype
+              udev
             ]
           );
         };

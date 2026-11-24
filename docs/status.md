@@ -1,7 +1,7 @@
 # Status
 
-Milestones 1 (discover), 2 (pair), 3 (first picture) and 5 (desktop UI).
-No sound or controller input yet (milestone 4).
+Milestones 1 (discover), 2 (pair), 3 (first picture), 4 (play) and 5 (desktop
+UI): sound, controllers and rumble, in the desktop app.
 
 Run `tether` with no arguments to open the app: it lists the consoles on your
 network, links new ones (sign in once, then type the 8-digit code), wakes and
@@ -28,6 +28,25 @@ tether unpair "Living Room"
 `tether stream` takes `--resolution 360p|540p|720p|1080p`, `--fps 30|60` and
 `--codec h264|h265` for that one session; otherwise it uses the app's
 settings (720p, 60 fps, H.264 until you change them).
+
+While streaming:
+
+- **Sound** plays on the default output device. `--audio-buffer <ms>` (default
+  30) trades delay for robustness on a jittery network; `--no-audio` turns
+  it off.
+- **Controllers** (anything SDL3 knows: DualSense, DualShock 4, Xbox, Switch
+  Pro, ...) drive the console, including the DualSense touchpad and motion
+  sensors. Several controllers act as one. Plug them in before or during
+  the stream.
+- **Rumble** comes back to the controller. Games that use DualSense haptics
+  get them as rumble (true haptics are not supported yet); DualSense
+  adaptive triggers, light bar and player lights work.
+- **Microphone**: the DualSense mute button switches your default
+  microphone on and off for voice chat; `--mic` starts with it on.
+
+On Linux, SDL3 needs read access to the controller's `/dev/hidraw*` node for
+rumble, triggers, touchpad and motion (Steam's udev rules, or your
+distribution's `game-devices-udev` package, set that up).
 
 ```
 $ tether discover

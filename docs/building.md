@@ -10,7 +10,9 @@ git submodule update --init --recursive
 
 All platforms need Rust (stable), CMake, a C compiler, libclang (for bindgen),
 `protoc`, Python 3 with the `protobuf` package (chiaki-ng's nanopb code
-generator uses both), and FFmpeg.
+generator uses both), and FFmpeg. Linux also needs SDL3 and ALSA's library
+(sound goes through PipeWire or PulseAudio if they run). libopus is always
+built from source as part of the Rust build.
 
 ## NixOS
 
@@ -28,7 +30,7 @@ cargo build --release
 ```
 sudo pacman -S --needed base-devel rust cmake clang pkgconf \
   openssl json-c miniupnpc libevent protobuf python-protobuf ffmpeg \
-  fontconfig libxkbcommon vulkan-icd-loader libva
+  fontconfig libxkbcommon vulkan-icd-loader libva sdl3 alsa-lib
 cargo build --release
 ```
 
@@ -58,9 +60,16 @@ vcpkg install --triplet x64-windows-static-md
 ```
 
 This fills `vcpkg_installed/` (including a static FFmpeg). To use another
-location, set `TETHER_VCPKG_INSTALLED` to the triplet directory. Then, from any
-terminal (no Developer Prompt needed), point the FFmpeg bindings at it and
-build:
+location, set `TETHER_VCPKG_INSTALLED` to the triplet directory.
+
+SDL3 and libopus don't come from vcpkg: cargo builds them from source with
+CMake and links them statically. Outside a Developer Prompt that needs
+`cmake` on PATH, or `CMAKE` set to its full path (Visual Studio's copy is in
+`Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\` under the Visual
+Studio folder; `winget install Kitware.CMake` also works).
+
+Then, from any terminal (no Developer Prompt needed), point the FFmpeg
+bindings at the vcpkg tree and build:
 
 ```
 $env:FFMPEG_DIR = "$PWD\vcpkg_installed\x64-windows-static-md"

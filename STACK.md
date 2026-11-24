@@ -79,8 +79,8 @@ branding. "Works with PS5" as plain text is fine.
 |---|---|
 | Protocol | `chiaki-sys` (our crate: `cmake` + `bindgen` on chiaki-ng `lib/`, git submodule pinned to a release tag) |
 | Safe API | `rp-core` (our crate): `Discovery`, `wake()`, `register(pin)`, `Session` with events on `crossbeam-channel` |
-| Audio out | `opus` (libopus) decode → `cpal` (WASAPI on Windows, ALSA/PipeWire on Linux, AAudio on Android) |
-| Mic | `cpal` input → `opus` encode |
+| Audio out | chiaki hands over raw Opus frames; `opus` (libopus, built from source by its crate) decodes them on chiaki's thread into a small jitter buffer (30 ms default) drained by `cpal` (WASAPI on Windows, ALSA/PipeWire on Linux, AAudio on Android) |
+| Mic | `cpal` input → `opus` encode (48 kHz stereo, CBR so every 10 ms packet is exactly the 40 bytes chiaki's audio sender accepts) → chiaki's audio sender |
 | Config | `serde` + `toml`, `directories` (desktop) / app files dir passed in (Android) |
 | Secrets | `keyring` on desktop; Android Keystore through the Kotlin side |
 | Logging / errors | `tracing` (+ `tracing-android` on Android), `thiserror`, `anyhow` |
@@ -93,9 +93,9 @@ branding. "Works with PS5" as plain text is fine.
 | UI | **Slint** 1.19 (winit backend, FemtoVG-on-wgpu renderer), using its wgpu 30 integration (`unstable-wgpu-30`) to show the video texture. Screens in `crates/desktop/ui/*.slint`, each with a global that the Rust side fills in |
 | Video decode | `ffmpeg-next` 9: VAAPI on Linux, D3D11VA on Windows, software fallback (also when the hardware decoder keeps failing mid-stream). The hwaccel setup calls `ffmpeg-sys-next` directly (`desktop/src/video/hwaccel.rs`) |
 | Video render | `wgpu` (Slint's own device and queue), NV12 → RGB shader (Vulkan / D3D12). For now hardware frames are downloaded to NV12 in system memory and uploaded again (`av_hwframe_transfer_data`); zero-copy (VAAPI dma-buf → Vulkan, D3D11 → D3D12 shared textures) is a later optimisation |
-| Controllers | `sdl3` crate: DualSense rumble, gyro, touchpad, lightbar |
-| Packaging | AppImage (Linux); zip or MSI with `cargo-wix` (Windows), FFmpeg, SDL3 and libopus DLLs bundled |
-| Native deps | Linux: system packages via pkg-config (Nix flake dev shell, or Arch packages). Windows: vcpkg (`vcpkg.json`, triplet `x64-windows-static-md`) |
+| Controllers | `sdl3` crate on its own thread (gamepad subsystem only; winit keeps the window): buttons, sticks, triggers, touchpad, gyro → chiaki's controller state on every change; rumble, adaptive triggers, light bar, player LEDs back. DualSense haptics (an audio stream) are turned into rumble for now; playing them on the controller's audio interface is a TODO |
+| Packaging | AppImage (Linux); zip or MSI with `cargo-wix` (Windows); FFmpeg, SDL3 and libopus are linked statically on Windows |
+| Native deps | Linux: system packages via pkg-config (Nix flake dev shell, or Arch packages). Windows: vcpkg (`vcpkg.json`, triplet `x64-windows-static-md`), except SDL3, which its crate builds from source. libopus is always built from source by its crate |
 | C toolchain (Windows) | chiaki-ng's C code is compiled with **clang-cl** + Ninja: it uses C99 variable-length arrays that MSVC's `cl.exe` rejects (upstream builds Windows with MinGW). clang-cl still emits MSVC-ABI objects, so Rust stays on `x86_64-pc-windows-msvc` |
 
 ### Android app (AYN Thor first)

@@ -5,9 +5,12 @@
 //! Threads:
 //! - `stream`: wakes the console, owns the [`Session`] and handles its events
 //!   and the UI's commands ([`Stream::stop`], [`Stream::set_login_pin`]).
-//! - chiaki's own threads: network; video frames arrive in the sink.
+//! - chiaki's own threads: network; video, audio and haptics arrive in the
+//!   sinks.
 //! - `video-decode`: FFmpeg decode, then NV12 upload and conversion with
 //!   wgpu ([`crate::video`]).
+//! - sound, controllers and microphone: [`crate::play::Play`] and its
+//!   threads (cpal output, SDL3 gamepads, event tap).
 
 use std::net::IpAddr;
 use std::sync::{Arc, OnceLock};
@@ -21,6 +24,7 @@ use tether_core::{
     ConsoleSecrets, DecoderPreference, LastSession, PairedConsole, StreamSettings, WakeProgress,
 };
 
+use crate::play::{Play, PlayOptions};
 use crate::video::render::VideoRenderer;
 use crate::video::{self, DecoderOptions, EncodedFrame, VideoStats};
 
@@ -42,6 +46,8 @@ pub struct StreamRequest {
     pub secrets: ConsoleSecrets,
     pub account_id: AccountId,
     pub settings: StreamSettings,
+    /// Sound, microphone and controller options.
+    pub play: PlayOptions,
 }
 
 pub enum StreamEvent {
@@ -250,14 +256,21 @@ fn run(
             })
             .is_ok()
     });
-    let (session, events) = match Session::start(&config, sink) {
+    // Sound, microphone, controllers and rumble. Opened before the session so
+    // its audio and haptics sinks exist from the first packet.
+    let mut play = Play::new(&req.play);
+    let (session, events) = match Session::start_with(&config, play.sinks(sink)) {
         Ok(s) => s,
-        Err(e) => return ended(e.to_string(), true),
+        Err(e) => {
+            play.stop();
+            return ended(e.to_string(), true);
+        }
     };
+    let session = Arc::new(session);
+    // `Play` reacts to rumble and other feedback events, then passes every
+    // event on to the loop below.
+    let events = play.attach(session.clone(), events);
     on_event(StreamEvent::Handshake);
-
-    // Milestone 4 plugs in here: start audio output and controller input
-    // for `session`, and handle `SessionEvent::Rumble` in the loop below.
 
     let mut connected_at: Option<(Instant, u64)> = None;
     let mut stop_deadline: Option<Instant> = None;
@@ -306,9 +319,11 @@ fn run(
         }
     }
 
-    // Dropping the session joins chiaki's threads and closes the frame
+    // `Play` releases its session handles (controller thread, microphone);
+    // then dropping the last one joins chiaki's threads and closes the frame
     // channel, which ends the decoder thread.
     let stopping = Instant::now();
+    play.stop();
     drop(session);
     let _ = decoder.join();
     {
