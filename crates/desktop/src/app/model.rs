@@ -350,17 +350,17 @@ pub struct StatsMeter {
 }
 
 impl StatsMeter {
-    /// `decoded` frames and `bytes` received so far.
-    pub fn update(&mut self, now: Instant, decoded: u64, bytes: u64) {
+    /// Frames shown and `bytes` received so far.
+    pub fn update(&mut self, now: Instant, frames: u64, bytes: u64) {
         if let Some((t, d, b)) = self.last {
             let dt = (now - t).as_secs_f64();
             if dt < 0.2 {
                 return;
             }
-            self.fps = decoded.saturating_sub(d) as f64 / dt;
+            self.fps = frames.saturating_sub(d) as f64 / dt;
             self.mbps = bytes.saturating_sub(b) as f64 * 8.0 / dt / 1_000_000.0;
         }
-        self.last = Some((now, decoded, bytes));
+        self.last = Some((now, frames, bytes));
     }
 
     /// "60 fps · 9.8 Mbps"

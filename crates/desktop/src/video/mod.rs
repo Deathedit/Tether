@@ -4,6 +4,11 @@
 //! in system memory (hardware frames are downloaded, other software formats
 //! go through swscale) and is handed to `on_frame`, which uploads it to the
 //! GPU ([`render::VideoRenderer`]).
+//!
+//! To never fall behind the console, every frame is decoded (the next ones
+//! depend on it) but only the newest is downloaded, converted and shown when
+//! more encoded frames are already waiting. The UI coalesces redraws on its
+//! side.
 
 pub mod hwaccel;
 pub mod render;
@@ -35,6 +40,11 @@ pub struct EncodedFrame {
 #[derive(Default)]
 pub struct VideoStats {
     pub decoded: AtomicU64,
+    /// Decoded frames that were shown.
+    pub presented: AtomicU64,
+    /// Decoded frames dropped unshown because newer ones were already
+    /// queued (the decoder was behind).
+    pub skipped: AtomicU64,
     pub errors: AtomicU64,
     pub bytes: AtomicU64,
     pub frames_lost: AtomicU64,
@@ -82,7 +92,7 @@ pub fn spawn_decoder(
             let mut scaler: Option<(scaling::Context, (Pixel, u32, u32))> = None;
             let mut hw_failures = 0u32;
 
-            for frame in frames {
+            for frame in frames.iter() {
                 stats
                     .bytes
                     .fetch_add(frame.data.len() as u64, Ordering::Relaxed);
@@ -123,6 +133,12 @@ pub fn spawn_decoder(
                     continue;
                 }
                 while decoder.inner.receive_frame(&mut decoded).is_ok() {
+                    stats.decoded.fetch_add(1, Ordering::Relaxed);
+                    if !frames.is_empty() {
+                        // Newer frames are queued: don't spend time showing this one.
+                        stats.skipped.fetch_add(1, Ordering::Relaxed);
+                        continue;
+                    }
                     let mut sw: &ffmpeg::frame::Video = &decoded;
                     if hwaccel::is_hw_frame(&decoded) {
                         if let Err(e) = hwaccel::download(&decoded, &mut downloaded) {
@@ -167,7 +183,7 @@ pub fn spawn_decoder(
                         sw = &converted;
                     }
 
-                    stats.decoded.fetch_add(1, Ordering::Relaxed);
+                    stats.presented.fetch_add(1, Ordering::Relaxed);
                     on_frame(&Nv12 {
                         width: sw.width(),
                         height: sw.height(),

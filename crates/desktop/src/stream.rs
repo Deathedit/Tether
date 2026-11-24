@@ -282,8 +282,22 @@ fn run(
 
     // Dropping the session joins chiaki's threads and closes the frame
     // channel, which ends the decoder thread.
+    let stopping = Instant::now();
     drop(session);
     let _ = decoder.join();
+    {
+        use std::sync::atomic::Ordering::Relaxed;
+        tracing::info!(
+            "video: {} decoded, {} shown, {} skipped (decoder behind), {} errors, {} frames lost; {} decoder; shutdown took {} ms",
+            stats.decoded.load(Relaxed),
+            stats.presented.load(Relaxed),
+            stats.skipped.load(Relaxed),
+            stats.errors.load(Relaxed),
+            stats.frames_lost.load(Relaxed),
+            stats.backend(),
+            stopping.elapsed().as_millis()
+        );
+    }
 
     let (mut reason, error) = quit.unwrap();
     if stop_deadline.is_some() {

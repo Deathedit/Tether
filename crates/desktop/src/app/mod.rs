@@ -870,7 +870,7 @@ impl App {
         let stats = s.stream.stats();
         s.meter.update(
             Instant::now(),
-            stats.decoded.load(Ordering::Relaxed),
+            stats.presented.load(Ordering::Relaxed),
             stats.bytes.load(Ordering::Relaxed),
         );
         let lost = stats.frames_lost.load(Ordering::Relaxed);
