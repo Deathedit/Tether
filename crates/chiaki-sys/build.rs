@@ -139,6 +139,16 @@ fn build_chiaki(chiaki_dir: &Path) -> PathBuf {
         // nanopb switches MSVC builds to the static CRT (/MT) by default;
         // Rust links the dynamic one (/MD), and mixing them breaks linking.
         ("nanopb_MSVC_STATIC_RUNTIME", "OFF"),
+        // The bundled curl only does plain HTTP(S) for chiaki. Without these
+        // it picks up whatever optional libraries the build machine has (e.g.
+        // zlib in a Nix shell) and then needs them at link time.
+        ("CURL_ZLIB", "OFF"),
+        ("CURL_BROTLI", "OFF"),
+        ("CURL_ZSTD", "OFF"),
+        ("USE_NGHTTP2", "OFF"),
+        ("USE_LIBIDN2", "OFF"),
+        ("CURL_USE_LIBPSL", "OFF"),
+        ("CURL_USE_LIBSSH2", "OFF"),
     ] {
         cfg.define(key, value);
     }
