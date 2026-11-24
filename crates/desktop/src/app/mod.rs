@@ -123,6 +123,7 @@ pub fn run(opts: Options) -> Result<()> {
         discovered: RefCell::new(Vec::new()),
         pairing: RefCell::new(PairingCtx::default()),
         stream: RefCell::new(None),
+        stopping: RefCell::new(Vec::new()),
         next_stream_id: Cell::new(1),
         settings_return: Cell::new(Screen::Consoles),
         hw_available: Cell::new(None),
@@ -157,8 +158,24 @@ pub fn run(opts: Options) -> Result<()> {
     }
 
     window.run()?;
-    // Stop any session before the process exits.
-    app.stream.borrow_mut().take();
+
+    // Let sessions close properly (and log their stats) before exiting.
+    // Their `Ended` events can't be handled any more, so save the summary
+    // here.
+    let mut streams: Vec<Stream> = app
+        .stopping
+        .borrow_mut()
+        .drain(..)
+        .map(|(_, s)| s)
+        .collect();
+    streams.extend(app.stream.borrow_mut().take().map(|s| s.stream));
+    for stream in streams {
+        if let Some(summary) = stream.finish(Duration::from_secs(5))
+            && let Err(e) = app.store.borrow_mut().set_last_session(summary)
+        {
+            tracing::warn!("could not save session summary: {e}");
+        }
+    }
     APP.with(|a| a.borrow_mut().take());
     if let Some(e) = app.exit_error.borrow_mut().take() {
         bail!("{e}");
@@ -219,6 +236,8 @@ struct App {
     discovered: RefCell<Vec<Console>>,
     pairing: RefCell<PairingCtx>,
     stream: RefCell<Option<ActiveStream>>,
+    /// Streams told to stop whose session hasn't closed yet.
+    stopping: RefCell<Vec<(u64, Stream)>>,
     next_stream_id: Cell<u64>,
     settings_return: Cell<Screen>,
     /// Whether the platform's hardware decoder could be opened.
@@ -735,6 +754,7 @@ impl App {
                 self.last_backend.set(Some(s.stream.stats().backend()));
             }
             s.stream.stop();
+            self.stopping.borrow_mut().push((s.id, s.stream));
         }
         self.leave_session(Screen::Consoles);
     }
@@ -757,6 +777,7 @@ impl App {
 
     fn on_stream_event(&self, id: u64, ev: StreamEvent) {
         if let StreamEvent::Ended(end) = ev {
+            self.stopping.borrow_mut().retain(|(i, _)| *i != id);
             if let Some(summary) = end.summary
                 && let Err(e) = self.store.borrow_mut().set_last_session(summary)
             {
@@ -865,6 +886,7 @@ impl App {
     }
 
     fn update_stats(&self) {
+        self.stopping.borrow_mut().retain(|(_, s)| !s.is_finished());
         let mut guard = self.stream.borrow_mut();
         let Some(s) = guard.as_mut() else { return };
         let stats = s.stream.stats();

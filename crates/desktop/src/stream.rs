@@ -81,11 +81,12 @@ enum Control {
 
 pub type EventSink = Arc<dyn Fn(StreamEvent) + Send + Sync>;
 
-/// A running stream. Dropping it stops the session (in the background).
+/// A running stream. Dropping it stops the session in the background; use
+/// [`Stream::finish`] to wait for it.
 pub struct Stream {
     ctl: Sender<Control>,
     stats: Arc<VideoStats>,
-    _thread: JoinHandle<()>,
+    thread: Option<JoinHandle<Option<LastSession>>>,
 }
 
 impl Stream {
@@ -102,14 +103,39 @@ impl Stream {
                 .name("stream".into())
                 .spawn(move || {
                     let end = run(request, gpu, ctl_rx, stats, on_event.clone());
+                    let summary = end.summary.clone();
                     on_event(StreamEvent::Ended(end));
+                    summary
                 })?
         };
         Ok(Self {
             ctl,
             stats,
-            _thread: thread,
+            thread: Some(thread),
         })
+    }
+
+    /// Whether the stream thread is done (its `Ended` event has been sent).
+    pub fn is_finished(&self) -> bool {
+        self.thread.as_ref().is_none_or(|t| t.is_finished())
+    }
+
+    /// Stops the stream and waits up to `timeout` for the session to close.
+    /// Returns the session summary if it ended in time and had connected.
+    pub fn finish(mut self, timeout: Duration) -> Option<LastSession> {
+        self.stop();
+        let deadline = Instant::now() + timeout;
+        while !self.is_finished() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        match self.thread.take() {
+            Some(t) if t.is_finished() => t.join().ok().flatten(),
+            Some(_) => {
+                tracing::warn!("session did not close within {} s", timeout.as_secs());
+                None
+            }
+            None => None,
+        }
     }
 
     pub fn set_login_pin(&self, pin: String) {
