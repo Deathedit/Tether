@@ -378,6 +378,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::unnecessary_cast)] // C enums are i32 on MSVC, u32 elsewhere
     fn buttons() {
         let mut b = Buttons::NONE;
         b.set(Buttons::CROSS, true);
