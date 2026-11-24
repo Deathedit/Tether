@@ -66,6 +66,9 @@ pub enum StreamEvent {
     },
     /// The stream is up; video follows.
     Connected,
+    /// Names of the connected controllers (empty: none). Sent when input
+    /// starts and whenever one is plugged in or removed.
+    Controllers(Vec<String>),
     /// A new video texture: the first frame, or the video size changed.
     Texture(wgpu::Texture),
     /// A new frame was drawn into the current texture.
@@ -269,7 +272,10 @@ fn run(
     let session = Arc::new(session);
     // `Play` reacts to rumble and other feedback events, then passes every
     // event on to the loop below.
-    let events = play.attach(session.clone(), events);
+    let events = play.attach(session.clone(), events, {
+        let on_event = on_event.clone();
+        move |names| on_event(StreamEvent::Controllers(names))
+    });
     on_event(StreamEvent::Handshake);
 
     let mut connected_at: Option<(Instant, u64)> = None;

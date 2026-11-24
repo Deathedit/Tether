@@ -721,6 +721,7 @@ impl App {
         s.set_menu_open(false);
         s.set_quality_text(model::quality_label(&settings).into());
         s.set_stats_text("Connecting…".into());
+        s.set_controller_text(model::controllers_label(&[]).into());
 
         *self.stream.borrow_mut() = Some(ActiveStream {
             id,
@@ -862,6 +863,11 @@ impl App {
                 g.set_passcode_requested(true);
             }
             StreamEvent::Connected => s.progress.connected(now),
+            StreamEvent::Controllers(names) => {
+                ui.global::<SessionState>()
+                    .set_controller_text(model::controllers_label(&names).into());
+                return;
+            }
             StreamEvent::Texture(texture) => match slint::Image::try_from(texture) {
                 Ok(image) => {
                     let g = ui.global::<SessionState>();

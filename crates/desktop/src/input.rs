@@ -88,27 +88,30 @@ impl Gamepads {
     /// Starts SDL and sends every controller change to `session`, and
     /// applies everything that arrives on `feedback` to the controllers.
     /// `on_mic_button` runs (on the gamepad thread) when a DualSense's mute
-    /// button is pressed.
+    /// button is pressed. `on_pads` gets the names of the connected
+    /// controllers at start and whenever one is added or removed.
     pub fn start(
         session: Arc<Session>,
         feedback: Receiver<Feedback>,
         on_mic_button: impl FnMut() + Send + 'static,
+        on_pads: impl FnMut(Vec<String>) + Send + 'static,
     ) -> Result<Self> {
         let (quit, quit_rx) = crossbeam_channel::bounded(1);
         let (ready_tx, ready_rx) = crossbeam_channel::bounded(1);
         let thread = std::thread::Builder::new()
             .name("gamepads".into())
             .spawn(move || {
-                let mut sdl = match SdlInput::new(session, Box::new(on_mic_button)) {
-                    Ok(s) => {
-                        let _ = ready_tx.send(Ok(()));
-                        s
-                    }
-                    Err(e) => {
-                        let _ = ready_tx.send(Err(e));
-                        return;
-                    }
-                };
+                let mut sdl =
+                    match SdlInput::new(session, Box::new(on_mic_button), Box::new(on_pads)) {
+                        Ok(s) => {
+                            let _ = ready_tx.send(Ok(()));
+                            s
+                        }
+                        Err(e) => {
+                            let _ = ready_tx.send(Err(e));
+                            return;
+                        }
+                    };
                 sdl.run(&feedback, &quit_rx);
             })?;
         ready_rx
@@ -148,6 +151,7 @@ struct SdlInput {
     _sdl: sdl3::Sdl,
     session: Arc<Session>,
     on_mic_button: Box<dyn FnMut() + Send>,
+    on_pads: Box<dyn FnMut(Vec<String>) + Send>,
     /// Last state sent to the console.
     sent: ControllerState,
     rumble_scale: f32,
@@ -160,7 +164,11 @@ struct SdlInput {
 }
 
 impl SdlInput {
-    fn new(session: Arc<Session>, on_mic_button: Box<dyn FnMut() + Send>) -> Result<Self> {
+    fn new(
+        session: Arc<Session>,
+        on_mic_button: Box<dyn FnMut() + Send>,
+        on_pads: Box<dyn FnMut(Vec<String>) + Send>,
+    ) -> Result<Self> {
         // No SDL window, so SDL never has focus: read controllers anyway.
         sdl3::hint::set("SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS", "1");
         let sdl = sdl3::init().map_err(|e| anyhow!("SDL init: {e}"))?;
@@ -175,6 +183,7 @@ impl SdlInput {
             _sdl: sdl,
             session,
             on_mic_button,
+            on_pads,
             sent: ControllerState::default(),
             rumble_scale: 1.0,
             trigger_intensity: Some(0x00),
@@ -192,7 +201,19 @@ impl SdlInput {
         if input.pads.is_empty() {
             eprintln!("No controller found; connect one at any time.");
         }
+        input.report_pads();
         Ok(input)
+    }
+
+    /// Tells `on_pads` which controllers are connected now.
+    fn report_pads(&mut self) {
+        let mut names: Vec<String> = self
+            .pads
+            .values()
+            .map(|p| p.gamepad.name().unwrap_or_else(|| "Controller".into()))
+            .collect();
+        names.sort();
+        (self.on_pads)(names);
     }
 
     fn run(&mut self, feedback: &Receiver<Feedback>, quit: &Receiver<()>) {
@@ -259,7 +280,10 @@ impl SdlInput {
     fn handle(&mut self, ev: Event) -> bool {
         match ev {
             Event::GamepadAdded { which, .. } => {
-                self.open(which);
+                if !self.pads.contains_key(&which) {
+                    self.open(which);
+                    self.report_pads();
+                }
                 false
             }
             Event::GamepadRemoved { which, .. } => {
@@ -268,6 +292,7 @@ impl SdlInput {
                         "Controller disconnected: {}",
                         p.gamepad.name().unwrap_or_default()
                     );
+                    self.report_pads();
                 }
                 true
             }

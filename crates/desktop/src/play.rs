@@ -83,15 +83,22 @@ impl Play {
     /// Starts controller input and the microphone control for `session`,
     /// and taps its event channel: the returned receiver gets every event
     /// after this has reacted to it.
+    /// `on_pads` gets the connected controllers' names whenever they change.
     pub fn attach(
         &mut self,
         session: Arc<Session>,
         events: Receiver<SessionEvent>,
+        on_pads: impl FnMut(Vec<String>) + Send + 'static,
     ) -> Receiver<SessionEvent> {
         let mic = Arc::new(Mutex::new(Mic::new(session.clone())));
         self.mic = Some(mic.clone());
         let feedback = self.feedback_rx.clone();
-        match Gamepads::start(session, feedback, move || mic.lock().unwrap().toggle()) {
+        match Gamepads::start(
+            session,
+            feedback,
+            move || mic.lock().unwrap().toggle(),
+            on_pads,
+        ) {
             Ok(g) => self.gamepads = Some(g),
             Err(e) => eprintln!("No controller input: {e:#}"),
         }

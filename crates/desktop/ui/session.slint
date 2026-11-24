@@ -15,7 +15,7 @@ export global SessionState {
     in property <bool> stats-good: true;
     // "1080p · 60"
     in property <string> quality-text;
-    // Controller row; milestone 4 (SDL3 input) fills this in.
+    // Controller row: connected controllers, from the SDL3 input thread.
     in property <string> controller-text: "Not connected";
     in property <bool> fullscreen;
     callback disconnect();

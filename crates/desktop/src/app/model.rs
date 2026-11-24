@@ -166,6 +166,16 @@ pub fn quality_label(s: &StreamSettings) -> String {
     format!("{} · {}", s.resolution, s.fps())
 }
 
+/// Controller row in the quick menu: "Not connected", "Xbox 360 Controller",
+/// or "DualSense Wireless Controller + 1 more".
+pub fn controllers_label(names: &[String]) -> String {
+    match names {
+        [] => "Not connected".to_owned(),
+        [one] => one.clone(),
+        [first, rest @ ..] => format!("{first} + {} more", rest.len()),
+    }
+}
+
 pub fn mbps(kbps: u32) -> String {
     let m = kbps as f64 / 1000.0;
     if (m - m.round()).abs() < 0.05 {
@@ -374,6 +384,19 @@ mod tests {
     use super::*;
     use rp_core::Target;
     use tether_core::VideoResolution;
+
+    #[test]
+    fn controller_labels() {
+        assert_eq!(controllers_label(&[]), "Not connected");
+        assert_eq!(
+            controllers_label(&["Xbox 360 Controller".into()]),
+            "Xbox 360 Controller"
+        );
+        assert_eq!(
+            controllers_label(&["A".into(), "B".into(), "C".into()]),
+            "A + 2 more"
+        );
+    }
 
     fn paired(id: &str, name: &str) -> PairedConsole {
         PairedConsole {
