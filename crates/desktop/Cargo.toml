@@ -1,0 +1,18 @@
+[package]
+name = "tether-desktop"
+description = "Tether desktop app for Linux and Windows (CLI for now; Slint UI from milestone 5)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "tether"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+rp-core.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

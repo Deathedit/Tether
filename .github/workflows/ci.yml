@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  linux:
+    # Builds inside the flake's dev shell, the same environment as NixOS.
+    name: Linux build + tests (Nix)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: cachix/install-nix-action@v31
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Warm up the dev shell
+        run: nix develop --command true
+
+      - run: nix develop --command cargo fmt --all --check
+      - run: nix develop --command cargo clippy --workspace --all-targets -- -D warnings
+      - run: nix develop --command cargo test --workspace
+      - run: nix develop --command cargo build --release -p tether-desktop
+
+  windows:
+    name: Windows build + tests
+    runs-on: windows-latest
+    env:
+      VCPKG_TRIPLET: x64-windows-static-md
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install protobuf
+
+      - uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cache vcpkg packages
+        uses: actions/cache@v4
+        with:
+          path: vcpkg_installed
+          key: vcpkg-${{ env.VCPKG_TRIPLET }}-${{ hashFiles('vcpkg.json') }}
+
+      - name: Install vcpkg packages
+        shell: pwsh
+        run: |
+          # The runner's vcpkg clone can be older than our builtin-baseline.
+          git -C "$env:VCPKG_INSTALLATION_ROOT" fetch --quiet origin master
+          & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install --triplet $env:VCPKG_TRIPLET
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - run: cargo test --workspace
+      - run: cargo build --release -p tether-desktop
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tether-windows-x86_64
+          path: target/release/tether.exe

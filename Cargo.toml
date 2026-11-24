@@ -1,0 +1,31 @@
+[workspace]
+resolver = "3"
+members = ["crates/chiaki-sys", "crates/rp-core", "crates/desktop"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-only"
+rust-version = "1.85"
+
+[workspace.dependencies]
+chiaki-sys = { path = "crates/chiaki-sys" }
+rp-core = { path = "crates/rp-core" }
+
+anyhow = "1"
+clap = { version = "4.5", features = ["derive"] }
+crossbeam-channel = "0.5"
+if-addrs = "0.13"
+socket2 = "0.5"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# build-time
+bindgen = "0.72"
+cc = "1.2"
+cmake = "0.1"
+pkg-config = "0.3"
+
+[profile.release]
+lto = "thin"

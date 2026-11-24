@@ -1,0 +1,15 @@
+[package]
+name = "rp-core"
+description = "Safe Rust API over chiaki-ng: console discovery, wake, registration and sessions"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+chiaki-sys.workspace = true
+crossbeam-channel.workspace = true
+if-addrs.workspace = true
+socket2.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
