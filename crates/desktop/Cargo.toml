@@ -1,6 +1,6 @@
 [package]
 name = "tether-desktop"
-description = "Tether desktop app for Linux and Windows (CLI for now; Slint UI from milestone 5)"
+description = "Tether desktop app for Linux and Windows: Slint UI, hardware video decoding, wgpu rendering, CLI"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -12,16 +12,17 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow.workspace = true
-bytemuck.workspace = true
 clap.workspace = true
 crossbeam-channel.workspace = true
 open.workspace = true
 rp-core.workspace = true
-softbuffer.workspace = true
+slint.workspace = true
 tether-core.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
-winit.workspace = true
+
+[build-dependencies]
+slint-build.workspace = true
 
 # Linux: the system FFmpeg via pkg-config (Nix shell, Arch package).
 [target.'cfg(not(windows))'.dependencies]

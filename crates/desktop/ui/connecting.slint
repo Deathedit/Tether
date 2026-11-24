@@ -1,0 +1,228 @@
+// Screen 3: waking the console and starting the session.
+
+import { Theme } from "theme.slint";
+import { Button, ButtonKind, Eyebrow, TextField, Banner } from "widgets.slint";
+
+export enum StepState { waiting, active, done, failed }
+
+export struct StepItem {
+    title: string,
+    detail: string,
+    state: StepState,
+}
+
+export global ConnectingState {
+    in property <string> console-name;
+    // "PS5"
+    in property <string> console-kind;
+    in property <[StepItem]> steps;
+    // 0..1: how far along the line the dot is.
+    in property <float> progress;
+    // "Agreeing on 1080p · 60 fps · HEVC · 15 Mbps"
+    in property <string> detail;
+    in property <string> error;
+    // The console asks for its Remote Play passcode.
+    in property <bool> passcode-requested;
+    in property <bool> passcode-retry;
+    in-out property <string> passcode;
+    callback submit-passcode(string);
+    callback cancel();
+}
+
+component Endpoint inherits VerticalLayout {
+    in property <image> icon;
+    in property <string> label;
+    spacing: 12px;
+    alignment: start;
+    Rectangle {
+        width: 64px;
+        height: 64px;
+        border-radius: 16px;
+        background: Theme.surface;
+        Image {
+            source: root.icon;
+            width: 26px;
+            colorize: Theme.text;
+        }
+    }
+    Text {
+        text: root.label;
+        font-size: 14px;
+        color: Theme.text-dim;
+        horizontal-alignment: center;
+    }
+}
+
+component StepCard inherits Rectangle {
+    in property <StepItem> item;
+    height: 72px;
+    border-radius: 12px;
+    background: root.item.state == StepState.waiting ? transparent : Theme.surface;
+    border-width: root.item.state == StepState.active || root.item.state == StepState.waiting ? 1px : 0px;
+    border-color: root.item.state == StepState.active ? Theme.accent : Theme.border;
+    VerticalLayout {
+        padding-left: 16px;
+        padding-right: 12px;
+        spacing: 6px;
+        alignment: center;
+        HorizontalLayout {
+            spacing: 10px;
+            Rectangle {
+                width: 14px;
+                if root.item.state == StepState.done: Image {
+                    source: @image-url("icons/check.svg");
+                    width: 14px;
+                    colorize: Theme.green;
+                }
+                if root.item.state == StepState.failed: Image {
+                    source: @image-url("icons/close.svg");
+                    width: 14px;
+                    colorize: Theme.danger;
+                }
+                if root.item.state == StepState.active || root.item.state == StepState.waiting: Rectangle {
+                    width: 8px;
+                    height: 8px;
+                    border-radius: 4px;
+                    background: root.item.state == StepState.active ? Theme.accent : transparent;
+                    border-width: root.item.state == StepState.waiting ? 1.5px : 0px;
+                    border-color: Theme.text-faint;
+                }
+            }
+            Text {
+                text: root.item.title;
+                font-size: 15px;
+                color: root.item.state == StepState.waiting ? Theme.text-dim : Theme.text;
+            }
+        }
+        Text {
+            text: root.item.detail;
+            font-size: 13px;
+            font-family: Theme.mono;
+            color: Theme.text-dim;
+            overflow: elide;
+        }
+    }
+}
+
+export component ConnectingScreen inherits Rectangle {
+    background: Theme.bg;
+
+    VerticalLayout {
+        alignment: center;
+        spacing: 0;
+
+        Eyebrow {
+            text: "CONNECTING";
+            horizontal-alignment: center;
+        }
+        Rectangle { height: 14px; }
+        Text {
+            text: ConnectingState.console-name;
+            font-size: 38px;
+            font-weight: 700;
+            color: Theme.text;
+            horizontal-alignment: center;
+        }
+        Rectangle { height: 56px; }
+
+        HorizontalLayout {
+            alignment: center;
+            spacing: 16px;
+            Endpoint {
+                icon: @image-url("icons/monitor.svg");
+                label: "This PC";
+            }
+            Rectangle {
+                width: 440px;
+                height: 64px;
+                property <length> split: self.width * ConnectingState.progress;
+                // Done part of the line.
+                Rectangle {
+                    x: 0;
+                    width: parent.split;
+                    height: 2px;
+                    background: Theme.accent;
+                }
+                // Remaining part, dashed.
+                for i in 40: Rectangle {
+                    x: i * parent.width / 40;
+                    width: parent.width / 80;
+                    height: 2px;
+                    background: Theme.text-faint;
+                    visible: self.x > parent.split;
+                }
+                Rectangle {
+                    x: parent.split - self.width / 2;
+                    width: 12px;
+                    height: 12px;
+                    border-radius: 6px;
+                    background: Theme.accent;
+                    animate x { duration: 300ms; easing: ease-out; }
+                }
+            }
+            Endpoint {
+                icon: @image-url("icons/gamepad.svg");
+                label: ConnectingState.console-kind;
+            }
+        }
+        Rectangle { height: 56px; }
+
+        HorizontalLayout {
+            alignment: center;
+            spacing: 12px;
+            for step in ConnectingState.steps: StepCard {
+                width: 170px;
+                item: step;
+            }
+        }
+        Rectangle { height: 44px; }
+
+        if ConnectingState.passcode-requested: HorizontalLayout {
+            alignment: center;
+            padding-bottom: 24px;
+            VerticalLayout {
+                width: 360px;
+                spacing: 10px;
+                Text {
+                    text: ConnectingState.passcode-retry ? "That passcode was wrong. Try again:" : "The console asks for its Remote Play passcode:";
+                    font-size: 15px;
+                    color: ConnectingState.passcode-retry ? Theme.danger : Theme.text;
+                    horizontal-alignment: center;
+                }
+                passcode-field := TextField {
+                    text <=> ConnectingState.passcode;
+                    placeholder: "Passcode";
+                    mono: true;
+                    accepted => { ConnectingState.submit-passcode(ConnectingState.passcode); }
+                    init => { self.focus-input(); }
+                }
+            }
+        }
+
+        if ConnectingState.error == "": Text {
+            text: ConnectingState.detail;
+            font-size: 14px;
+            font-family: Theme.mono;
+            color: Theme.text-dim;
+            horizontal-alignment: center;
+        }
+        if ConnectingState.error != "": HorizontalLayout {
+            alignment: center;
+            Banner {
+                width: 640px;
+                text: ConnectingState.error;
+                dismissed => { ConnectingState.cancel(); }
+            }
+        }
+        Rectangle { height: 20px; }
+        HorizontalLayout {
+            alignment: center;
+            Button {
+                text: ConnectingState.error == "" ? "Cancel" : "Back";
+                kind: ButtonKind.outline;
+                width: 92px;
+                clicked => { ConnectingState.cancel(); }
+            }
+        }
+    }
+}

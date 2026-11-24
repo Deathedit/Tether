@@ -6,11 +6,19 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use crate::settings::{LastSession, StreamSettings};
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Config {
     /// PSN account ID (base64), from `tether login`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub psn_account_id: Option<String>,
+
+    #[serde(default)]
+    pub stream: StreamSettings,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_session: Option<LastSession>,
 
     #[serde(default, rename = "console", skip_serializing_if = "Vec::is_empty")]
     pub consoles: Vec<PairedConsole>,
@@ -118,6 +126,14 @@ mod tests {
         let mut config = Config {
             psn_account_id: Some("AQAAAAAAAAA=".into()),
             consoles: vec![],
+            last_session: Some(LastSession {
+                console: "PS5-309".into(),
+                started_at: 1_700_000_000,
+                duration_secs: 3600,
+                video: "1080p60".into(),
+                frames_lost: 2,
+            }),
+            ..Default::default()
         };
         config.upsert(console("9047485221DD", "PS5-309"));
         config.save(&path).unwrap();

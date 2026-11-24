@@ -1,0 +1,386 @@
+// Screen 1: the console list.
+
+import { Theme } from "theme.slint";
+import { Button, ButtonKind, Card, Eyebrow, IconButton, StatusDot, Banner } from "widgets.slint";
+
+export enum ConsoleState { ready, rest, away, unknown }
+
+export struct ConsoleItem {
+    host-id: string,
+    name: string,
+    // "PS5 · 192.168.1.222"
+    meta: string,
+    state: ConsoleState,
+    paired: bool,
+    // Shown as the large card at the top.
+    featured: bool,
+}
+
+export global ConsolesState {
+    in property <[ConsoleItem]> consoles;
+    // "1 linked · 1 on this network"
+    in property <string> summary;
+    in property <bool> signed-in;
+    // "Starts at 720p · 60 fps · H.264"
+    in property <string> start-text;
+    in property <string> decoder;
+    in property <string> video-setting;
+    in property <string> account-text;
+    in property <bool> has-last-session;
+    in property <string> last-session-title;
+    in property <string> last-session-detail;
+    in-out property <string> banner;
+
+    callback connect(string);
+    callback link(string);
+    callback add-console();
+    callback open-settings();
+    callback open-account();
+}
+
+component StateLabel inherits HorizontalLayout {
+    in property <ConsoleState> state;
+    in property <bool> paired;
+    spacing: 6px;
+    property <color> color: root.state == ConsoleState.ready ? Theme.green
+        : root.state == ConsoleState.rest ? Theme.amber : Theme.text-faint;
+    StatusDot {
+        y: (parent.height - self.height) / 2;
+        dot-color: root.color;
+        hollow: root.state == ConsoleState.away;
+    }
+    Text {
+        vertical-alignment: center;
+        font-size: 14px;
+        color: root.state == ConsoleState.away ? Theme.text-dim : root.color;
+        text: root.state == ConsoleState.ready ? (root.paired ? "Ready" : "Ready · not linked")
+            : root.state == ConsoleState.rest ? (root.paired ? "Rest mode" : "Rest mode · not linked")
+            : root.state == ConsoleState.away ? "Away from this network" : "Unknown";
+    }
+}
+
+component FeaturedCard inherits Card {
+    in property <ConsoleItem> item;
+    in property <string> start-text;
+    callback connect();
+
+    VerticalLayout {
+        padding: 28px;
+        spacing: 8px;
+        StateLabel {
+            state: root.item.state;
+            paired: root.item.paired;
+        }
+        Text {
+            text: root.item.name;
+            font-size: 28px;
+            font-weight: 700;
+            color: Theme.text;
+        }
+        Text {
+            text: root.item.meta;
+            font-size: 14px;
+            font-family: Theme.mono;
+            color: Theme.text-dim;
+        }
+        Rectangle { height: 18px; }
+        HorizontalLayout {
+            spacing: 14px;
+            alignment: start;
+            Button {
+                text: "Connect";
+                kind: ButtonKind.primary;
+                height: 41px;
+                width: 102px;
+                font-size: 14px;
+                clicked => { root.connect(); }
+            }
+            Text {
+                text: root.start-text;
+                vertical-alignment: center;
+                font-size: 14px;
+                color: Theme.text-dim;
+            }
+        }
+    }
+}
+
+component ConsoleRow inherits Card {
+    in property <ConsoleItem> item;
+    callback connect();
+    callback link();
+
+    HorizontalLayout {
+        padding-left: 23px;
+        padding-right: 23px;
+        padding-top: 17px;
+        padding-bottom: 17px;
+        spacing: 10px;
+        VerticalLayout {
+            spacing: 5px;
+            alignment: center;
+            HorizontalLayout {
+                spacing: 12px;
+                alignment: start;
+                Text {
+                    text: root.item.name;
+                    font-size: 15px;
+                    font-weight: 600;
+                    color: root.item.state == ConsoleState.away ? Theme.text-dim : Theme.text;
+                }
+                StateLabel {
+                    state: root.item.state;
+                    paired: root.item.paired;
+                }
+            }
+            Text {
+                text: root.item.meta;
+                font-size: 13px;
+                font-family: Theme.mono;
+                color: Theme.text-faint;
+            }
+        }
+        if !root.item.paired: Button {
+            y: (parent.height - self.height) / 2;
+            text: "Link";
+            kind: ButtonKind.outline;
+            height: 36px;
+            clicked => { root.link(); }
+        }
+        if root.item.paired && root.item.state != ConsoleState.away: Button {
+            y: (parent.height - self.height) / 2;
+            text: root.item.state == ConsoleState.rest ? "Wake and connect" : "Connect";
+            kind: ButtonKind.secondary;
+            height: 36px;
+            clicked => { root.connect(); }
+        }
+    }
+}
+
+component SideStat inherits VerticalLayout {
+    in property <string> label;
+    in property <string> value;
+    spacing: 4px;
+    Text {
+        text: root.label;
+        font-size: 13px;
+        color: Theme.text-dim;
+    }
+    Text {
+        text: root.value;
+        font-size: 14px;
+        font-family: Theme.mono;
+        color: Theme.text;
+        overflow: elide;
+    }
+}
+
+export component ConsolesScreen inherits Rectangle {
+    background: Theme.bg;
+
+    VerticalLayout {
+        padding-left: 33px;
+        padding-right: 33px;
+        padding-top: 18px;
+        padding-bottom: 18px;
+        spacing: 0;
+
+        // Header
+        HorizontalLayout {
+            height: 49px;
+            spacing: 10px;
+            Image {
+                source: @image-url("icons/logo.svg");
+                width: 23px;
+                colorize: Theme.accent;
+            }
+            Text {
+                text: "Tether";
+                font-size: 14px;
+                font-weight: 600;
+                color: Theme.text;
+                vertical-alignment: center;
+            }
+            Rectangle { horizontal-stretch: 1; }
+            Rectangle {
+                y: (parent.height - self.height) / 2;
+                height: 33px;
+                width: chip-row.preferred-width + 9px;
+                border-radius: 17px;
+                background: chip-touch.has-hover ? Theme.surface-2 : Theme.surface;
+                chip-touch := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { ConsolesState.open-account(); }
+                }
+                chip-row := HorizontalLayout {
+                    padding-left: 5px;
+                    padding-right: 13px;
+                    spacing: 9px;
+                    Rectangle {
+                        y: (parent.height - self.height) / 2;
+                        width: 23px;
+                        height: 23px;
+                        border-radius: 12px;
+                        background: Theme.surface-2;
+                        StatusDot {
+                            dot-color: ConsolesState.signed-in ? Theme.green : Theme.text-faint;
+                        }
+                    }
+                    Text {
+                        text: ConsolesState.account-text;
+                        font-size: 14px;
+                        color: Theme.text;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+            IconButton {
+                y: (parent.height - self.height) / 2;
+                icon: @image-url("icons/gear.svg");
+                filled: false;
+                icon-size: 17px;
+                clicked => { ConsolesState.open-settings(); }
+            }
+        }
+
+        Rectangle { height: 38px; }
+
+        // Title row
+        HorizontalLayout {
+            padding-left: 59px;
+            padding-right: 59px;
+            VerticalLayout {
+                spacing: 6px;
+                Text {
+                    text: "Consoles";
+                    font-size: 33px;
+                    font-weight: 700;
+                    color: Theme.text;
+                }
+                Text {
+                    text: ConsolesState.summary;
+                    font-size: 14px;
+                    color: Theme.text-dim;
+                }
+            }
+            Rectangle { horizontal-stretch: 1; }
+            Button {
+                y: (parent.height - self.height) / 2;
+                text: "Add console";
+                icon: @image-url("icons/plus.svg");
+                has-icon: true;
+                kind: ButtonKind.outline;
+                height: 44px;
+                font-size: 14px;
+                clicked => { ConsolesState.add-console(); }
+            }
+        }
+
+        Rectangle { height: 23px; }
+
+        if ConsolesState.banner != "": HorizontalLayout {
+            padding-left: 59px;
+            padding-right: 59px;
+            padding-bottom: 13px;
+            Banner {
+                text: ConsolesState.banner;
+                dismissed => { ConsolesState.banner = ""; }
+            }
+        }
+
+        // Body
+        HorizontalLayout {
+            padding-left: 59px;
+            padding-right: 59px;
+            spacing: 20px;
+            vertical-stretch: 1;
+
+            Flickable {
+                horizontal-stretch: 1;
+                content-height: list.preferred-height;
+                list := VerticalLayout {
+                    alignment: start;
+                    spacing: 13px;
+                    if ConsolesState.consoles.length == 0: Card {
+                        height: 128px;
+                        VerticalLayout {
+                            padding: 28px;
+                            spacing: 6px;
+                            alignment: center;
+                            Text {
+                                text: "Looking for consoles…";
+                                font-size: 15px;
+                                font-weight: 600;
+                                color: Theme.text;
+                            }
+                            Text {
+                                text: "Turn your console on and keep it on the same network as this PC, then click Add console.";
+                                font-size: 13px;
+                                wrap: word-wrap;
+                                color: Theme.text-dim;
+                            }
+                        }
+                    }
+                    for item in ConsolesState.consoles: VerticalLayout {
+                        if item.featured: FeaturedCard {
+                            item: item;
+                            start-text: ConsolesState.start-text;
+                            connect => { ConsolesState.connect(item.host-id); }
+                        }
+                        if !item.featured: ConsoleRow {
+                            item: item;
+                            connect => { ConsolesState.connect(item.host-id); }
+                            link => { ConsolesState.link(item.host-id); }
+                        }
+                    }
+                }
+            }
+
+            VerticalLayout {
+                width: 301px;
+                spacing: 13px;
+                alignment: start;
+                Card {
+                    VerticalLayout {
+                        padding: 24px;
+                        spacing: 17px;
+                        Eyebrow { text: "THIS PC"; }
+                        HorizontalLayout {
+                            spacing: 13px;
+                            SideStat {
+                                label: "Decoder";
+                                value: ConsolesState.decoder;
+                            }
+                            SideStat {
+                                label: "Video";
+                                value: ConsolesState.video-setting;
+                            }
+                        }
+                    }
+                }
+                if ConsolesState.has-last-session: Rectangle {
+                    border-radius: Theme.radius-card;
+                    border-width: 1px;
+                    border-color: Theme.border;
+                    VerticalLayout {
+                        padding: 24px;
+                        spacing: 8px;
+                        Eyebrow { text: "LAST SESSION"; }
+                        Text {
+                            text: ConsolesState.last-session-title;
+                            font-size: 14px;
+                            color: Theme.text;
+                            wrap: word-wrap;
+                        }
+                        Text {
+                            text: ConsolesState.last-session-detail;
+                            font-size: 13px;
+                            font-family: Theme.mono;
+                            color: Theme.text-dim;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

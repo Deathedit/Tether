@@ -27,9 +27,15 @@ cargo build --release
 
 ```
 sudo pacman -S --needed base-devel rust cmake clang pkgconf \
-  openssl json-c miniupnpc libevent protobuf python-protobuf ffmpeg
+  openssl json-c miniupnpc libevent protobuf python-protobuf ffmpeg \
+  fontconfig libxkbcommon vulkan-icd-loader libva
 cargo build --release
 ```
+
+For hardware decoding and rendering you also need your GPU's VAAPI driver
+(`libva-mesa-driver` for AMD, `intel-media-driver` for Intel,
+`libva-nvidia-driver` for NVIDIA) and its Vulkan driver (`vulkan-radeon`,
+`vulkan-intel`, or the NVIDIA driver).
 
 Use `rustup` instead of the `rust` package if you prefer; `rust-toolchain.toml`
 pins stable.
