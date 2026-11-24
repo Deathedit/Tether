@@ -8,16 +8,21 @@ See [STACK.md](STACK.md) for the architecture and milestones.
 
 ## Status
 
-Milestones 1 (discover) and 2 (pair) — command line only so far:
+Milestones 1 (discover), 2 (pair) and 3 (first picture). Command line plus a
+plain video window so far; no sound or controller input yet:
 
 ```
 tether discover              # consoles on the LAN, and whether they're paired
 tether login                 # sign in to PSN once (gets your account ID)
 tether pair 192.168.1.20     # pair using the 8-digit code the console shows
 tether consoles              # paired consoles
-tether wake "Living Room"    # wake a paired console from rest mode
+tether wake "Living Room"    # wake a paired console (--wait: until it's ready)
+tether stream "Living Room"  # wake it if needed and show its video in a window
 tether unpair "Living Room"
 ```
+
+`tether stream` takes `--resolution 360p|540p|720p|1080p` (default 720p),
+`--fps 30|60` and `--codec h264|h265`. Video is decoded in software for now.
 
 ```
 $ tether discover
@@ -53,8 +58,8 @@ git submodule update --init --recursive
 ```
 
 All platforms need Rust (stable), CMake, a C compiler, libclang (for bindgen),
-`protoc`, and Python 3 with the `protobuf` package (chiaki-ng's nanopb code
-generator uses both).
+`protoc`, Python 3 with the `protobuf` package (chiaki-ng's nanopb code
+generator uses both), and FFmpeg.
 
 ### NixOS
 
@@ -71,7 +76,7 @@ cargo build --release
 
 ```
 sudo pacman -S --needed base-devel rust cmake clang pkgconf \
-  openssl json-c miniupnpc libevent protobuf python-protobuf
+  openssl json-c miniupnpc libevent protobuf python-protobuf ffmpeg
 cargo build --release
 ```
 
@@ -95,11 +100,13 @@ Build the native libraries once, from the repository root, in a
 vcpkg install --triplet x64-windows-static-md
 ```
 
-This fills `vcpkg_installed/`. To use another location, set
-`TETHER_VCPKG_INSTALLED` to the triplet directory. Then, from any terminal (no
-Developer Prompt needed):
+This fills `vcpkg_installed/` (including a static FFmpeg). To use another
+location, set `TETHER_VCPKG_INSTALLED` to the triplet directory. Then, from any
+terminal (no Developer Prompt needed), point the FFmpeg bindings at it and
+build:
 
 ```
+$env:FFMPEG_DIR = "$PWD\vcpkg_installed\x64-windows-static-md"
 cargo build --release
 ```
 
@@ -117,6 +124,7 @@ environment variables to the full paths.
 third_party/chiaki-ng/   git submodule, pinned to v1.10.1
 crates/chiaki-sys/       builds chiaki-ng's lib/ with CMake, bindgen bindings
 crates/rp-core/          safe Rust API: discovery, wake, registration, PSN sign-in
-crates/tether-core/      app logic: config file, paired consoles, secret storage
-crates/desktop/          the `tether` binary (CLI now, Slint UI later)
+crates/tether-core/      app logic: config, paired consoles, secrets, wake-and-wait
+crates/desktop/          the `tether` binary: CLI, FFmpeg decoder, video window
+                         (Slint UI and wgpu rendering in milestone 5)
 ```

@@ -1,13 +1,18 @@
 {
   "name": "tether",
   "version-string": "0.1.0",
-  "description": "Native dependencies of chiaki-ng's core library, for Windows builds. Install with: vcpkg install --triplet x64-windows-static-md",
+  "description": "Native dependencies for Windows builds (chiaki-ng's core library, FFmpeg). Install with: vcpkg install --triplet x64-windows-static-md",
   "builtin-baseline": "944dee83774536dd280cf459f41989584b9ef86a",
   "dependencies": [
     "pkgconf",
     "openssl",
     "json-c",
     "miniupnpc",
-    "libevent"
+    "libevent",
+    {
+      "name": "ffmpeg",
+      "default-features": false,
+      "features": ["avcodec", "avformat", "swscale"]
+    }
   ]
 }

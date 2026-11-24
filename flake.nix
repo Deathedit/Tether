@@ -36,7 +36,22 @@
             json_c
             miniupnpc
             libevent
+            ffmpeg
           ];
+
+          # winit and softbuffer load these at runtime (dlopen) rather than
+          # linking them, so they must be findable when `tether stream` runs.
+          LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath (
+            with pkgs;
+            [
+              libxkbcommon
+              wayland
+              xorg.libX11
+              xorg.libXcursor
+              xorg.libXrandr
+              xorg.libXi
+            ]
+          );
         };
       });
 

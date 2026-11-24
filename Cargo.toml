@@ -18,12 +18,15 @@ base64 = "0.23"
 clap = { version = "4.5", features = ["derive"] }
 crossbeam-channel = "0.5"
 directories = "6"
+# `format` isn't used, but ffmpeg-next 9 doesn't compile without it.
+ffmpeg-next = { version = "9", default-features = false, features = ["codec", "format", "software-scaling"] }
 hex = "0.4"
 if-addrs = "0.13"
 keyring = "4"
 open = "5"
 serde = { version = "1", features = ["derive"] }
 socket2 = "0.5"
+softbuffer = "0.4"
 tempfile = "3"
 thiserror = "2"
 toml = "1"
@@ -31,6 +34,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 ureq = { version = "3", features = ["json"] }
 url = "2"
+winit = "0.30"
 
 # build-time
 bindgen = "0.72"

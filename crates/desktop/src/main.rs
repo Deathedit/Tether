@@ -1,6 +1,10 @@
 //! `tether`: desktop entry point. For now a CLI; the Slint UI arrives in
 //! milestone 5.
 
+mod stream;
+mod video;
+mod window;
+
 use std::io::{BufRead, Write};
 use std::net::{IpAddr, ToSocketAddrs};
 use std::process::ExitCode;
@@ -8,8 +12,8 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
-use rp_core::{AccountId, ConsoleState, DiscoveryOptions, RegistRequest, psn};
-use tether_core::{Config, Store};
+use rp_core::{AccountId, Codec, ConsoleState, DiscoveryOptions, RegistRequest, Resolution, psn};
+use tether_core::{Config, ConsoleSecrets, PairedConsole, Store, WakeProgress};
 use tracing_subscriber::EnvFilter;
 
 /// Where the pairing code is on the console.
@@ -80,7 +84,54 @@ enum Command {
         /// With --regist-key: the console is a PS4 (uses the PS4 wake port)
         #[arg(long, requires = "regist_key")]
         ps4: bool,
+
+        /// Paired consoles only: keep waking until the console reports ready
+        #[arg(short, long, conflicts_with = "regist_key")]
+        wait: bool,
     },
+    /// Stream a paired console in a window (waking it first if needed)
+    Stream {
+        /// Name, address or ID of the paired console
+        console: String,
+
+        /// Video resolution
+        #[arg(short, long, value_enum, default_value_t = ResolutionArg::P720)]
+        resolution: ResolutionArg,
+
+        /// Frames per second (30 or 60)
+        #[arg(long, default_value_t = 60, value_parser = parse_fps)]
+        fps: u32,
+
+        /// Video codec
+        #[arg(long, value_enum, default_value_t = CodecArg::H264)]
+        codec: CodecArg,
+    },
+}
+
+fn parse_fps(s: &str) -> Result<u32, String> {
+    match s {
+        "30" => Ok(30),
+        "60" => Ok(60),
+        _ => Err("must be 30 or 60".into()),
+    }
+}
+
+#[derive(Clone, Copy, clap::ValueEnum)]
+enum ResolutionArg {
+    #[value(name = "360p")]
+    P360,
+    #[value(name = "540p")]
+    P540,
+    #[value(name = "720p")]
+    P720,
+    #[value(name = "1080p")]
+    P1080,
+}
+
+#[derive(Clone, Copy, clap::ValueEnum)]
+enum CodecArg {
+    H264,
+    H265,
 }
 
 fn main() -> ExitCode {
@@ -132,7 +183,29 @@ fn run(command: Command) -> Result<()> {
             console,
             regist_key,
             ps4,
-        } => wake(&console, regist_key, ps4),
+            wait,
+        } => wake(&console, regist_key, ps4, wait),
+        Command::Stream {
+            console,
+            resolution,
+            fps,
+            codec,
+        } => stream::run(
+            &console,
+            stream::StreamOptions {
+                resolution: match resolution {
+                    ResolutionArg::P360 => Resolution::P360,
+                    ResolutionArg::P540 => Resolution::P540,
+                    ResolutionArg::P720 => Resolution::P720,
+                    ResolutionArg::P1080 => Resolution::P1080,
+                },
+                fps,
+                codec: match codec {
+                    CodecArg::H264 => Codec::H264,
+                    CodecArg::H265 => Codec::H265,
+                },
+            },
+        ),
     }
 }
 
@@ -272,23 +345,26 @@ fn consoles() -> Result<()> {
     Ok(())
 }
 
-fn wake(console: &str, regist_key: Option<String>, ps4: bool) -> Result<()> {
+fn wake(console: &str, regist_key: Option<String>, ps4: bool, wait: bool) -> Result<()> {
     if let Some(key) = regist_key {
         rp_core::wake(console, &key, !ps4)?;
         println!("Wake-up packet sent to {console}.");
         return Ok(());
     }
     let store = Store::open_default()?;
-    let paired = store.find(console).with_context(|| {
-        format!("{console:?} is not paired. Pair it first, or pass --regist-key.")
-    })?;
-    let secrets = store.secrets_for(paired)?.with_context(|| {
-        format!(
-            "keys for {} are missing from the {}; pair it again",
-            paired.name,
-            store.secret_store().describe()
-        )
-    })?;
+    let (paired, secrets) = paired_with_secrets(&store, console)?;
+    if wait {
+        eprint!("Waking {}", paired.name);
+        tether_core::ensure_awake(&paired, &secrets, Duration::from_secs(60), |p| {
+            if p != WakeProgress::Waking {
+                eprint!(".");
+                std::io::stderr().flush().ok();
+            }
+        })?;
+        eprintln!();
+        println!("{} is ready.", paired.name);
+        return Ok(());
+    }
     rp_core::wake(
         &paired.address,
         &secrets.regist_key_hex(),
@@ -299,6 +375,22 @@ fn wake(console: &str, regist_key: Option<String>, ps4: bool) -> Result<()> {
         paired.name, paired.address
     );
     Ok(())
+}
+
+/// Looks up a paired console and its keys.
+fn paired_with_secrets(store: &Store, query: &str) -> Result<(PairedConsole, ConsoleSecrets)> {
+    let paired = store
+        .find(query)
+        .with_context(|| format!("{query:?} is not paired. Pair it with `tether pair <address>`."))?
+        .clone();
+    let secrets = store.secrets_for(&paired)?.with_context(|| {
+        format!(
+            "keys for {} are missing from the {}; pair it again",
+            paired.name,
+            store.secret_store().describe()
+        )
+    })?;
+    Ok((paired, secrets))
 }
 
 /// Reads one line from stdin after printing `label` to stderr.

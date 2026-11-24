@@ -34,6 +34,8 @@ jobs:
     runs-on: windows-latest
     env:
       VCPKG_TRIPLET: x64-windows-static-md
+      # ffmpeg-sys-next finds vcpkg's FFmpeg through this.
+      FFMPEG_DIR: ${{ github.workspace }}\vcpkg_installed\x64-windows-static-md
     steps:
       - uses: actions/checkout@v4
         with:
@@ -49,12 +51,14 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Cache vcpkg packages
+        id: vcpkg-cache
         uses: actions/cache@v4
         with:
           path: vcpkg_installed
           key: vcpkg-${{ env.VCPKG_TRIPLET }}-${{ hashFiles('vcpkg.json') }}
 
       - name: Install vcpkg packages
+        if: steps.vcpkg-cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
           # Use vcpkg at exactly our builtin-baseline; the runner's own clone

@@ -13,8 +13,19 @@ path = "src/main.rs"
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
+crossbeam-channel.workspace = true
 open.workspace = true
 rp-core.workspace = true
+softbuffer.workspace = true
 tether-core.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+winit.workspace = true
+
+# Linux: the system FFmpeg via pkg-config (Nix shell, Arch package).
+[target.'cfg(not(windows))'.dependencies]
+ffmpeg-next.workspace = true
+
+# Windows: vcpkg's static FFmpeg, found through FFMPEG_DIR.
+[target.'cfg(windows)'.dependencies]
+ffmpeg-next = { workspace = true, features = ["static"] }
