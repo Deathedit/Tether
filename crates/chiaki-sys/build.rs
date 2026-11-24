@@ -24,7 +24,9 @@ const CMAKE_LIBS: &[&str] = &[
 ];
 
 /// Libraries that chiaki-ng's lib links against, looked up with pkg-config.
-const PKG_CONFIG_LIBS: &[&str] = &["libcrypto", "libevent", "json-c", "miniupnpc"];
+/// `libssl` is needed on Linux, where the bundled curl uses OpenSSL for TLS
+/// (on Windows it uses Schannel, and linking libssl there is harmless).
+const PKG_CONFIG_LIBS: &[&str] = &["libssl", "libcrypto", "libevent", "json-c", "miniupnpc"];
 
 fn main() {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
