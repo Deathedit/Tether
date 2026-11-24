@@ -1,0 +1,335 @@
+// Screen 2: adding (linking) a console. Step 1 signs in to get the account
+// ID, step 2 takes the 8-digit code, step 3 confirms.
+
+import { Theme } from "theme.slint";
+import { Button, ButtonKind, Card, Eyebrow, Link, StatusDot, TextField, Banner } from "widgets.slint";
+
+export global PairingState {
+    // 1: sign in, 2: link code, 3: linked.
+    in property <int> step: 2;
+    in property <bool> busy;
+    in-out property <string> error;
+
+    // Step 1
+    in-out property <string> sign-in-text;
+    callback open-sign-in();
+    callback submit-sign-in(string);
+
+    // Step 2: the console to link.
+    in property <bool> has-target;
+    in property <string> target-title;
+    in property <string> target-detail;
+    in-out property <bool> manual-ip;
+    in-out property <string> ip-text;
+    in-out property <string> pin;
+    in property <[string]> pin-digits: ["", "", "", "", "", "", "", ""];
+    in property <bool> pin-complete;
+    in-out property <bool> show-help;
+    callback pin-edited(string);
+    callback submit-pin();
+
+    // Step 3
+    in property <string> linked-name;
+    callback connect-now();
+
+    callback back();
+    callback close();
+}
+
+component StepBar inherits HorizontalLayout {
+    in property <int> step;
+    spacing: 6px;
+    for i in 3: Rectangle {
+        height: 3px;
+        border-radius: 2px;
+        background: i < root.step ? Theme.accent : Theme.surface-2;
+    }
+}
+
+component PinBox inherits Rectangle {
+    in property <string> digit;
+    in property <bool> active;
+    width: 52px;
+    height: 64px;
+    border-radius: 10px;
+    background: Theme.surface;
+    border-width: root.active ? 2px : 1px;
+    border-color: root.active ? Theme.accent : Theme.border;
+    Text {
+        text: root.digit;
+        font-size: 28px;
+        font-family: Theme.mono;
+        color: Theme.text;
+    }
+}
+
+export component PairingScreen inherits Rectangle {
+    background: Theme.bg;
+
+    // Header
+    HorizontalLayout {
+        y: 18px;
+        x: 33px;
+        height: 48px;
+        spacing: 22px;
+        Rectangle {
+            width: 32px;
+            back-touch := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { PairingState.close(); }
+            }
+            Image {
+                source: @image-url("icons/arrow-left.svg");
+                width: 22px;
+                colorize: back-touch.has-hover ? Theme.text : Theme.text-dim;
+            }
+        }
+        Text {
+            text: "Add console";
+            font-size: 15px;
+            color: Theme.text-dim;
+            vertical-alignment: center;
+        }
+    }
+
+    VerticalLayout {
+        x: (parent.width - self.width) / 2;
+        width: min(560px, parent.width - 64px);
+        padding-top: 120px;
+        spacing: 0;
+        alignment: start;
+
+        StepBar { step: PairingState.step; }
+        Rectangle { height: 16px; }
+        Eyebrow {
+            text: PairingState.step == 1 ? "STEP 1 OF 3 · SIGN IN"
+                : PairingState.step == 2 ? "STEP 2 OF 3 · LINK CODE" : "STEP 3 OF 3 · DONE";
+        }
+        Rectangle { height: 28px; }
+
+        // Step 1: sign in
+        if PairingState.step == 1: VerticalLayout {
+            spacing: 18px;
+            Text {
+                text: "Sign in once";
+                font-size: 34px;
+                font-weight: 700;
+                color: Theme.text;
+            }
+            Text {
+                text: "Linking needs your account ID. Open the sign-in page, sign in, and the browser ends on a blank page. Copy that page's address from the address bar and paste it here. An account ID from chiaki-ng works too.";
+                font-size: 15px;
+                wrap: word-wrap;
+                color: Theme.text-dim;
+            }
+            HorizontalLayout {
+                alignment: start;
+                Button {
+                    text: "Open sign-in page";
+                    kind: ButtonKind.outline;
+                    clicked => { PairingState.open-sign-in(); }
+                }
+            }
+            Rectangle { height: 6px; }
+            Text {
+                text: "Address or account ID";
+                font-size: 14px;
+                color: Theme.text-dim;
+            }
+            sign-in-field := TextField {
+                text <=> PairingState.sign-in-text;
+                placeholder: "https://remoteplay.dl.playstation.net/remoteplay/redirect?code=…";
+                accepted => { PairingState.submit-sign-in(PairingState.sign-in-text); }
+            }
+        }
+
+        // Step 2: link code
+        if PairingState.step == 2: VerticalLayout {
+            spacing: 14px;
+            Text {
+                text: "Enter the code from your console";
+                font-size: 34px;
+                font-weight: 700;
+                color: Theme.text;
+                wrap: word-wrap;
+            }
+            Text {
+                text: "On your PS5, open Settings › System › Remote Play › Link Device. It shows an 8-digit code.";
+                font-size: 15px;
+                wrap: word-wrap;
+                color: Theme.text-dim;
+            }
+            Rectangle { height: 14px; }
+            Text {
+                text: "Link code";
+                font-size: 14px;
+                color: Theme.text-dim;
+            }
+            Rectangle {
+                height: 64px;
+                pin-input := TextInput {
+                    // Invisible; the boxes show what it holds.
+                    width: 100%;
+                    height: 100%;
+                    color: transparent;
+                    selection-background-color: transparent;
+                    selection-foreground-color: transparent;
+                    font-size: 1px;
+                    single-line: true;
+                    input-type: number;
+                    text <=> PairingState.pin;
+                    edited => { PairingState.pin-edited(self.text); }
+                    accepted => { PairingState.submit-pin(); }
+                    init => { self.focus(); }
+                }
+                TouchArea {
+                    mouse-cursor: MouseCursor.text;
+                    clicked => { pin-input.focus(); }
+                }
+                HorizontalLayout {
+                    spacing: 8px;
+                    alignment: start;
+                    for d[i] in PairingState.pin-digits: HorizontalLayout {
+                        spacing: 8px;
+                        if i == 4: Text {
+                            text: "–";
+                            font-size: 22px;
+                            color: Theme.text-faint;
+                            vertical-alignment: center;
+                        }
+                        PinBox {
+                            digit: d;
+                            active: pin-input.has-focus && (i == PairingState.pin.character-count || (i == 7 && PairingState.pin.character-count == 8));
+                        }
+                    }
+                }
+            }
+            Rectangle { height: 22px; }
+            Card {
+                border-radius: 14px;
+                HorizontalLayout {
+                    padding: 18px;
+                    padding-left: 22px;
+                    spacing: 16px;
+                    StatusDot {
+                        y: (parent.height - self.height) / 2;
+                        dot-color: PairingState.has-target ? Theme.green : Theme.text-faint;
+                    }
+                    if !PairingState.manual-ip: VerticalLayout {
+                        spacing: 4px;
+                        horizontal-stretch: 1;
+                        Text {
+                            text: PairingState.target-title;
+                            font-size: 15px;
+                            color: Theme.text;
+                        }
+                        Text {
+                            text: PairingState.target-detail;
+                            font-size: 13px;
+                            font-family: Theme.mono;
+                            color: Theme.text-dim;
+                        }
+                    }
+                    if PairingState.manual-ip: TextField {
+                        horizontal-stretch: 1;
+                        text <=> PairingState.ip-text;
+                        placeholder: "Console IP address, e.g. 192.168.1.20";
+                        mono: true;
+                    }
+                    Link {
+                        vertical-alignment: center;
+                        text: PairingState.manual-ip ? "Use found console" : "Enter IP instead";
+                        clicked => { PairingState.manual-ip = !PairingState.manual-ip; }
+                    }
+                }
+            }
+            if PairingState.show-help: Text {
+                text: "The code is only shown while the Link Device screen is open, for a few minutes. If it disappeared, open the screen again for a new one. The console must be on (not in rest mode) and on the same network as this PC.";
+                font-size: 14px;
+                wrap: word-wrap;
+                color: Theme.text-dim;
+            }
+        }
+
+        // Step 3: linked
+        if PairingState.step == 3: VerticalLayout {
+            spacing: 18px;
+            Text {
+                text: "Linked with " + PairingState.linked-name;
+                font-size: 34px;
+                font-weight: 700;
+                color: Theme.text;
+                wrap: word-wrap;
+            }
+            Text {
+                text: "Its keys are saved on this PC. You can connect to it from the console list from now on.";
+                font-size: 15px;
+                wrap: word-wrap;
+                color: Theme.text-dim;
+            }
+        }
+
+        if PairingState.error != "": VerticalLayout {
+            padding-top: 22px;
+            Banner {
+                text: PairingState.error;
+                dismissed => { PairingState.error = ""; }
+            }
+        }
+
+        Rectangle { height: 40px; }
+
+        // Footer buttons
+        HorizontalLayout {
+            spacing: 16px;
+            if PairingState.step == 2: Link {
+                vertical-alignment: center;
+                text: "Can't find the code?";
+                color: Theme.text-dim;
+                clicked => { PairingState.show-help = !PairingState.show-help; }
+            }
+            Rectangle { horizontal-stretch: 1; }
+            if PairingState.busy: Text {
+                text: PairingState.step == 1 ? "Signing in…" : "Linking…";
+                font-size: 15px;
+                color: Theme.text-dim;
+                vertical-alignment: center;
+            }
+            if PairingState.step != 3: Button {
+                text: "Back";
+                kind: ButtonKind.ghost;
+                height: 48px;
+                clicked => { PairingState.back(); }
+            }
+            if PairingState.step == 1: Button {
+                text: "Continue";
+                kind: ButtonKind.primary;
+                height: 48px;
+                width: 140px;
+                enabled: !PairingState.busy && PairingState.sign-in-text != "";
+                clicked => { PairingState.submit-sign-in(PairingState.sign-in-text); }
+            }
+            if PairingState.step == 2: Button {
+                text: "Link console";
+                kind: ButtonKind.primary;
+                height: 48px;
+                width: 140px;
+                enabled: !PairingState.busy && PairingState.pin-complete && (PairingState.has-target || PairingState.manual-ip);
+                clicked => { PairingState.submit-pin(); }
+            }
+            if PairingState.step == 3: Button {
+                text: "Done";
+                kind: ButtonKind.ghost;
+                height: 48px;
+                clicked => { PairingState.close(); }
+            }
+            if PairingState.step == 3: Button {
+                text: "Connect now";
+                kind: ButtonKind.primary;
+                height: 48px;
+                width: 140px;
+                clicked => { PairingState.connect-now(); }
+            }
+        }
+    }
+}

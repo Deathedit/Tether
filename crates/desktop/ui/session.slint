@@ -1,0 +1,226 @@
+// Screen 4: the stream, with the stats pill and the quick menu.
+
+import { Theme } from "theme.slint";
+import { Button, ButtonKind, IconButton, StatusDot, Eyebrow } from "widgets.slint";
+
+export global SessionState {
+    // The video texture (rendered by wgpu on the decoder thread).
+    in property <image> video;
+    in property <bool> has-video;
+    in property <string> console-name;
+    in-out property <bool> menu-open;
+    in-out property <bool> stats-visible: true;
+    // "60 fps · 32.4 Mbps · HEVC · D3D11VA"
+    in property <string> stats-text;
+    in property <bool> stats-good: true;
+    // "1080p · 60"
+    in property <string> quality-text;
+    // Controller row; milestone 4 (SDL3 input) fills this in.
+    in property <string> controller-text: "Not connected";
+    in property <bool> fullscreen;
+    callback disconnect();
+    callback toggle-fullscreen();
+}
+
+component MenuRow inherits Rectangle {
+    in property <image> icon;
+    in property <string> label;
+    in property <string> value;
+    in property <bool> chevron;
+    in property <bool> clickable: true;
+    callback clicked();
+    height: 56px;
+    border-radius: 12px;
+    background: touch.has-hover && root.clickable ? Theme.surface-2 : transparent;
+    touch := TouchArea {
+        enabled: root.clickable;
+        mouse-cursor: root.clickable ? pointer : default;
+        clicked => { root.clicked(); }
+    }
+    HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 14px;
+        spacing: 14px;
+        Image {
+            y: (parent.height - self.height) / 2;
+            source: root.icon;
+            width: 18px;
+            height: 18px;
+            colorize: Theme.text;
+        }
+        Text {
+            text: root.label;
+            font-size: 15px;
+            color: Theme.text;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+        }
+        Text {
+            text: root.value;
+            font-size: 13px;
+            font-family: Theme.mono;
+            color: Theme.text-dim;
+            vertical-alignment: center;
+        }
+        if root.chevron: Image {
+            y: (parent.height - self.height) / 2;
+            source: @image-url("icons/chevron-right.svg");
+            width: 14px;
+            height: 14px;
+            colorize: Theme.text-faint;
+        }
+    }
+}
+
+export component SessionScreen inherits Rectangle {
+    background: #000000;
+
+    public function focus-keys() {
+        keys.focus();
+    }
+
+    keys := FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                SessionState.menu-open = !SessionState.menu-open;
+                return accept;
+            }
+            if (event.text == Key.F11) {
+                SessionState.toggle-fullscreen();
+                return accept;
+            }
+            if (event.text == Key.F3) {
+                SessionState.stats-visible = !SessionState.stats-visible;
+                return accept;
+            }
+            reject
+        }
+
+        Image {
+            width: parent.width;
+            height: parent.height;
+            source: SessionState.video;
+            image-fit: contain;
+            image-rendering: smooth;
+        }
+
+        if !SessionState.has-video: Text {
+            text: "Waiting for video…";
+            font-size: 14px;
+            font-family: Theme.mono;
+            color: Theme.text-faint;
+        }
+
+        // Clicking the video closes the menu.
+        TouchArea {
+            enabled: SessionState.menu-open;
+            clicked => {
+                SessionState.menu-open = false;
+                keys.focus();
+            }
+        }
+
+        if SessionState.stats-visible || SessionState.menu-open: Rectangle {
+            x: 20px;
+            y: 20px;
+            width: stats-row.preferred-width;
+            height: 32px;
+            border-radius: 16px;
+            background: #0e1015d0;
+            stats-row := HorizontalLayout {
+                padding-left: 16px;
+                padding-right: 16px;
+                spacing: 10px;
+                StatusDot {
+                    y: (parent.height - self.height) / 2;
+                    dot-color: SessionState.stats-good ? Theme.green : Theme.amber;
+                }
+                Text {
+                    text: SessionState.stats-text;
+                    font-size: 13px;
+                    font-family: Theme.mono;
+                    color: Theme.text;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        if SessionState.menu-open: Rectangle {
+            x: parent.width - self.width - 20px;
+            y: 20px;
+            width: 340px;
+            height: parent.height - 40px;
+            border-radius: 20px;
+            background: #12151cf2;
+            // Swallow clicks so they don't reach the video's TouchArea.
+            TouchArea { }
+            VerticalLayout {
+                padding: 24px;
+                spacing: 6px;
+                HorizontalLayout {
+                    VerticalLayout {
+                        spacing: 4px;
+                        Eyebrow { text: SessionState.console-name; }
+                        Text {
+                            text: "Quick menu";
+                            font-size: 22px;
+                            font-weight: 600;
+                            color: Theme.text;
+                        }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    IconButton {
+                        icon: @image-url("icons/close.svg");
+                        icon-size: 16px;
+                        clicked => {
+                            SessionState.menu-open = false;
+                            keys.focus();
+                        }
+                    }
+                }
+                Rectangle { height: 16px; }
+                MenuRow {
+                    icon: @image-url("icons/signal.svg");
+                    label: "Quality";
+                    value: SessionState.quality-text;
+                    clickable: false;
+                    background: Theme.surface;
+                }
+                MenuRow {
+                    icon: @image-url("icons/gamepad.svg");
+                    label: "Controller";
+                    value: SessionState.controller-text;
+                    clickable: false;
+                }
+                MenuRow {
+                    icon: @image-url("icons/chart.svg");
+                    label: "Stats overlay";
+                    value: "F3";
+                    clicked => { SessionState.stats-visible = !SessionState.stats-visible; }
+                }
+                MenuRow {
+                    icon: @image-url("icons/fullscreen.svg");
+                    label: SessionState.fullscreen ? "Leave fullscreen" : "Fullscreen";
+                    value: "F11";
+                    clicked => { SessionState.toggle-fullscreen(); }
+                }
+                Rectangle { vertical-stretch: 1; }
+                Text {
+                    text: "Press Esc to open or close this menu.";
+                    font-size: 13px;
+                    color: Theme.text-dim;
+                    wrap: word-wrap;
+                }
+                Rectangle { height: 8px; }
+                Button {
+                    text: "Disconnect";
+                    icon: @image-url("icons/power.svg");
+                    has-icon: true;
+                    kind: ButtonKind.danger;
+                    height: 52px;
+                    clicked => { SessionState.disconnect(); }
+                }
+            }
+        }
+    }
+}

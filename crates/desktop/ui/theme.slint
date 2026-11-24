@@ -1,0 +1,27 @@
+// Colours, type and spacing from the design.
+
+export global Theme {
+    out property <color> bg: #0e1015;
+    out property <color> surface: #161a22;
+    out property <color> surface-2: #1e232d;
+    out property <color> surface-hover: #242a36;
+    out property <color> border: #262c38;
+    out property <color> text: #f2f4f8;
+    out property <color> text-dim: #a0a8b8;
+    out property <color> text-faint: #6b7385;
+    out property <color> accent: #a5b0ff;
+    out property <color> accent-hover: #b8c1ff;
+    out property <color> accent-muted: #5d6494;
+    out property <color> on-accent: #10131c;
+    out property <color> green: #5fd39a;
+    out property <color> amber: #f2b84b;
+    out property <color> danger: #ff8a7a;
+    out property <color> danger-bg: #2a1d1f;
+    out property <color> danger-bg-hover: #362426;
+
+    // Set from Rust: a monospace family that exists on this system.
+    in-out property <string> mono: "monospace";
+
+    out property <length> radius-card: 13px;
+    out property <length> radius-control: 8px;
+}

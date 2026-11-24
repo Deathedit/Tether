@@ -90,9 +90,9 @@ branding. "Works with PS5" as plain text is fine.
 
 | Part | Pick |
 |---|---|
-| UI | **Slint**, using its wgpu integration to show the video texture |
-| Video decode | `ffmpeg-next` (FFmpeg 7.x): VAAPI on Linux, D3D11VA on Windows, software fallback |
-| Video render | `wgpu`, NV12 → RGB shader (Vulkan / D3D12) |
+| UI | **Slint** 1.19 (winit backend, FemtoVG-on-wgpu renderer), using its wgpu 30 integration (`unstable-wgpu-30`) to show the video texture. Screens in `crates/desktop/ui/*.slint`, each with a global that the Rust side fills in |
+| Video decode | `ffmpeg-next` 9: VAAPI on Linux, D3D11VA on Windows, software fallback (also when the hardware decoder keeps failing mid-stream). The hwaccel setup calls `ffmpeg-sys-next` directly (`desktop/src/video/hwaccel.rs`) |
+| Video render | `wgpu` (Slint's own device and queue), NV12 → RGB shader (Vulkan / D3D12). For now hardware frames are downloaded to NV12 in system memory and uploaded again (`av_hwframe_transfer_data`); zero-copy (VAAPI dma-buf → Vulkan, D3D11 → D3D12 shared textures) is a later optimisation |
 | Controllers | `sdl3` crate: DualSense rumble, gyro, touchpad, lightbar |
 | Packaging | AppImage (Linux); zip or MSI with `cargo-wix` (Windows), FFmpeg, SDL3 and libopus DLLs bundled |
 | Native deps | Linux: system packages via pkg-config (Nix flake dev shell, or Arch packages). Windows: vcpkg (`vcpkg.json`, triplet `x64-windows-static-md`) |
@@ -135,6 +135,11 @@ tether/
 desktop, MediaCodec on Android) → screen. Audio has its own thread. Input is
 sent to the session as soon as it arrives. The UI only gets state changes
 and stats, about 4 times a second.
+
+On desktop the decoder thread also does the GPU work: it uploads each NV12
+frame and runs the conversion shader into an RGBA texture on the same wgpu
+queue Slint renders with, then asks the UI thread to redraw. The UI thread
+never touches pixels.
 
 ---
 
@@ -179,7 +184,8 @@ and stats, about 4 times a second.
 >   pinned to a release tag) through `chiaki-sys`, built with the `cmake` and
 >   `bindgen` crates. Do not re-implement the protocol.
 > - Put all `unsafe` code in `chiaki-sys`, `rp-core` and the Android decoder
->   in `tether-ffi`.
+>   in `tether-ffi`. (Exception: the FFmpeg hwaccel glue in
+>   `desktop/src/video/hwaccel.rs`, since `ffmpeg-next` has no safe API for it.)
 > - Android video: MediaCodec driven from Rust via the `ndk` crate, drawing
 >   straight onto the SurfaceView's ANativeWindow. No per-frame JNI.
 > - Android bottom screen: find the secondary display with `DisplayManager`

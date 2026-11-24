@@ -6,6 +6,7 @@ use rp_core::{AccountId, RegisteredConsole};
 
 use crate::config::{Config, ConfigError, PairedConsole};
 use crate::secrets::{ConsoleSecrets, SecretStore, SecretsError};
+use crate::settings::{LastSession, StreamSettings};
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
@@ -80,6 +81,19 @@ impl Store {
 
     pub fn set_account_id(&mut self, id: AccountId) -> Result<(), StoreError> {
         self.config.psn_account_id = Some(id.to_base64());
+        self.save()
+    }
+
+    pub fn set_stream_settings(&mut self, settings: StreamSettings) -> Result<(), StoreError> {
+        if self.config.stream != settings {
+            self.config.stream = settings;
+            self.save()?;
+        }
+        Ok(())
+    }
+
+    pub fn set_last_session(&mut self, session: LastSession) -> Result<(), StoreError> {
+        self.config.last_session = Some(session);
         self.save()
     }
 
@@ -176,6 +190,11 @@ mod tests {
         let mut store = Store::open(dir.path().to_path_buf(), secrets.clone()).unwrap();
 
         store.set_account_id(AccountId::from_user_id(1)).unwrap();
+        let stream = StreamSettings {
+            fps: 30,
+            ..Default::default()
+        };
+        store.set_stream_settings(stream).unwrap();
         let paired = store
             .add_paired(&registered(), "PS5-309", "192.168.1.222")
             .unwrap();
@@ -187,6 +206,7 @@ mod tests {
             store.account_id().unwrap(),
             Some(AccountId::from_user_id(1))
         );
+        assert_eq!(store.config().stream, stream);
         let found = store.find("ps5-309").unwrap().clone();
         assert_eq!(found.target(), Target::PS5_1);
         assert_eq!(

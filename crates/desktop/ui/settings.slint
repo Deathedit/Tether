@@ -1,0 +1,330 @@
+// Screen 5: settings.
+
+import { Theme } from "theme.slint";
+import { Button, ButtonKind, Card, Eyebrow, Segmented, Slider } from "widgets.slint";
+
+export struct LinkedConsole {
+    host-id: string,
+    name: string,
+    meta: string,
+}
+
+export global SettingsState {
+    // 0: Stream, 1: Account, 2: About
+    in-out property <int> section;
+
+    // Stream
+    in property <[string]> resolutions;
+    in property <int> resolution;
+    in property <int> fps;          // index: 0 = 30, 1 = 60
+    in property <int> codec;        // index: 0 = H.264, 1 = HEVC
+    in property <float> bitrate-mbps;
+    in property <float> bitrate-min;
+    in property <float> bitrate-max;
+    in property <[string]> decoders; // ["Auto · D3D11VA", "Software"]
+    in property <int> decoder;
+    in property <string> estimate;
+
+    // Account
+    in property <string> account-id;
+    in property <[LinkedConsole]> linked;
+    in property <string> storage;
+
+    // About
+    in property <string> version;
+
+    callback set-resolution(int);
+    callback set-fps(int);
+    callback set-codec(int);
+    callback set-bitrate(float);
+    callback reset-bitrate();
+    callback set-decoder(int);
+    callback sign-in();
+    callback forget(string);
+    callback back();
+}
+
+component NavItem inherits Rectangle {
+    in property <string> text;
+    in property <bool> selected;
+    callback clicked();
+    height: 44px;
+    border-radius: 10px;
+    background: root.selected ? Theme.surface : (touch.has-hover ? #ffffff08 : transparent);
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+    Text {
+        x: 14px;
+        text: root.text;
+        font-size: 15px;
+        color: root.selected ? Theme.text : Theme.text-dim;
+        font-weight: root.selected ? 600 : 400;
+    }
+}
+
+component Row inherits Rectangle {
+    in property <string> title;
+    in property <string> subtitle;
+    in property <bool> divider: true;
+    min-height: 84px;
+    HorizontalLayout {
+        padding-top: 18px;
+        padding-bottom: 18px;
+        spacing: 24px;
+        VerticalLayout {
+            spacing: 4px;
+            alignment: center;
+            horizontal-stretch: 1;
+            Text {
+                text: root.title;
+                font-size: 15px;
+                color: Theme.text;
+            }
+            Text {
+                text: root.subtitle;
+                font-size: 14px;
+                color: Theme.text-dim;
+                wrap: word-wrap;
+            }
+        }
+        HorizontalLayout {
+            alignment: end;
+            @children
+        }
+    }
+    if root.divider: Rectangle {
+        y: parent.height - 1px;
+        height: 1px;
+        background: Theme.border;
+    }
+}
+
+export component SettingsScreen inherits Rectangle {
+    background: Theme.bg;
+
+    // Header
+    HorizontalLayout {
+        y: 18px;
+        x: 33px;
+        height: 48px;
+        spacing: 22px;
+        Rectangle {
+            width: 32px;
+            back-touch := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { SettingsState.back(); }
+            }
+            Image {
+                source: @image-url("icons/arrow-left.svg");
+                width: 22px;
+                colorize: back-touch.has-hover ? Theme.text : Theme.text-dim;
+            }
+        }
+        Text {
+            text: "Settings";
+            font-size: 20px;
+            font-weight: 600;
+            color: Theme.text;
+            vertical-alignment: center;
+        }
+    }
+
+    HorizontalLayout {
+        y: 90px;
+        height: parent.height - 90px;
+        padding-left: 110px;
+        padding-right: 110px;
+        spacing: 40px;
+
+        VerticalLayout {
+            width: 200px;
+            spacing: 2px;
+            alignment: start;
+            NavItem {
+                text: "Stream";
+                selected: SettingsState.section == 0;
+                clicked => { SettingsState.section = 0; }
+            }
+            NavItem {
+                text: "Account";
+                selected: SettingsState.section == 1;
+                clicked => { SettingsState.section = 1; }
+            }
+            NavItem {
+                text: "About";
+                selected: SettingsState.section == 2;
+                clicked => { SettingsState.section = 2; }
+            }
+        }
+
+        Flickable {
+            horizontal-stretch: 1;
+            content-height: content.preferred-height;
+
+            content := VerticalLayout {
+                alignment: start;
+                padding-bottom: 32px;
+
+                if SettingsState.section == 0: VerticalLayout {
+                    Eyebrow { text: "VIDEO"; }
+                    Row {
+                        title: "Resolution";
+                        subtitle: "Higher needs a faster network";
+                        Segmented {
+                            options: SettingsState.resolutions;
+                            selected: SettingsState.resolution;
+                            changed(i) => { SettingsState.set-resolution(i); }
+                        }
+                    }
+                    Row {
+                        title: "Frame rate";
+                        subtitle: "60 fps feels smoother; 30 fps saves bandwidth";
+                        Segmented {
+                            options: ["30 fps", "60 fps"];
+                            selected: SettingsState.fps;
+                            changed(i) => { SettingsState.set-fps(i); }
+                        }
+                    }
+                    Row {
+                        title: "Codec";
+                        subtitle: "HEVC looks better at the same bitrate";
+                        Segmented {
+                            options: ["H.264", "HEVC"];
+                            selected: SettingsState.codec;
+                            changed(i) => { SettingsState.set-codec(i); }
+                        }
+                    }
+                    Row {
+                        title: "Bitrate";
+                        subtitle: "Lower it if the picture stutters. Changing the resolution resets it.";
+                        HorizontalLayout {
+                            spacing: 20px;
+                            Slider {
+                                y: (parent.height - self.height) / 2;
+                                width: 220px;
+                                minimum: SettingsState.bitrate-min;
+                                maximum: SettingsState.bitrate-max;
+                                value: SettingsState.bitrate-mbps;
+                                step: 1;
+                                moved(v) => { SettingsState.set-bitrate(v); }
+                            }
+                            Text {
+                                width: 80px;
+                                text: round(SettingsState.bitrate-mbps) + " Mbps";
+                                font-size: 15px;
+                                font-family: Theme.mono;
+                                color: Theme.text;
+                                vertical-alignment: center;
+                                horizontal-alignment: right;
+                            }
+                        }
+                    }
+                    Rectangle { height: 40px; }
+                    Eyebrow { text: "DECODING"; }
+                    Row {
+                        title: "Video decoder";
+                        subtitle: "Auto uses VAAPI on Linux and D3D11VA on Windows, and falls back to software if that fails";
+                        divider: false;
+                        Segmented {
+                            options: SettingsState.decoders;
+                            selected: SettingsState.decoder;
+                            mono: false;
+                            changed(i) => { SettingsState.set-decoder(i); }
+                        }
+                    }
+                    Rectangle { height: 28px; }
+                    Card {
+                        border-radius: 14px;
+                        HorizontalLayout {
+                            padding: 20px;
+                            spacing: 14px;
+                            alignment: start;
+                            Text {
+                                text: "Estimated use";
+                                font-size: 14px;
+                                color: Theme.text-dim;
+                                vertical-alignment: center;
+                            }
+                            Text {
+                                text: SettingsState.estimate;
+                                font-size: 15px;
+                                font-family: Theme.mono;
+                                color: Theme.text;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
+
+                if SettingsState.section == 1: VerticalLayout {
+                    Eyebrow { text: "ACCOUNT"; }
+                    Row {
+                        title: "Account ID";
+                        subtitle: SettingsState.account-id == "" ? "Not signed in. Linking a console needs it." : SettingsState.account-id;
+                        Button {
+                            y: (parent.height - self.height) / 2;
+                            text: SettingsState.account-id == "" ? "Sign in" : "Sign in again";
+                            kind: ButtonKind.outline;
+                            clicked => { SettingsState.sign-in(); }
+                        }
+                    }
+                    Rectangle { height: 40px; }
+                    Eyebrow { text: "LINKED CONSOLES"; }
+                    if SettingsState.linked.length == 0: Row {
+                        title: "None yet";
+                        subtitle: "Add one from the console list.";
+                        divider: false;
+                    }
+                    for c in SettingsState.linked: Row {
+                        title: c.name;
+                        subtitle: c.meta;
+                        Button {
+                            y: (parent.height - self.height) / 2;
+                            text: "Forget";
+                            kind: ButtonKind.danger;
+                            clicked => { SettingsState.forget(c.host-id); }
+                        }
+                    }
+                    Rectangle { height: 24px; }
+                    Text {
+                        text: SettingsState.storage;
+                        font-size: 13px;
+                        color: Theme.text-faint;
+                        wrap: word-wrap;
+                    }
+                }
+
+                if SettingsState.section == 2: VerticalLayout {
+                    spacing: 12px;
+                    Eyebrow { text: "ABOUT"; }
+                    Text {
+                        text: "Tether " + SettingsState.version;
+                        font-size: 22px;
+                        font-weight: 600;
+                        color: Theme.text;
+                    }
+                    Text {
+                        text: "A Remote Play client for Linux and Windows. Works with PS5.";
+                        font-size: 15px;
+                        color: Theme.text-dim;
+                        wrap: word-wrap;
+                    }
+                    Text {
+                        text: "Free software under the GNU Affero General Public License v3. Built on chiaki-ng, Slint, wgpu and FFmpeg.";
+                        font-size: 15px;
+                        color: Theme.text-dim;
+                        wrap: word-wrap;
+                    }
+                    Text {
+                        text: "Not affiliated with or endorsed by Sony Interactive Entertainment.";
+                        font-size: 13px;
+                        color: Theme.text-faint;
+                        wrap: word-wrap;
+                    }
+                }
+            }
+        }
+    }
+}

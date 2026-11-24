@@ -1,0 +1,38 @@
+// Tether's main window. Each screen keeps its state in a global
+// (`ConsolesState`, `PairingState`, ...) that the Rust side fills in.
+
+import { Theme } from "theme.slint";
+import { ConsolesScreen, ConsolesState, ConsoleItem, ConsoleState } from "consoles.slint";
+import { PairingScreen, PairingState } from "pairing.slint";
+import { ConnectingScreen, ConnectingState, StepItem, StepState } from "connecting.slint";
+import { SessionScreen, SessionState } from "session.slint";
+import { SettingsScreen, SettingsState, LinkedConsole } from "settings.slint";
+
+export { Theme, ConsolesState, ConsoleItem, ConsoleState, PairingState, ConnectingState, StepItem, StepState, SessionState, SettingsState, LinkedConsole }
+
+export enum Screen { consoles, pairing, connecting, session, settings }
+
+export component AppWindow inherits Window {
+    title: "Tether";
+    icon: @image-url("icons/logo.svg");
+    background: Theme.bg;
+    preferred-width: 1280px;
+    preferred-height: 800px;
+    min-width: 1000px;
+    min-height: 640px;
+    default-font-size: 15px;
+
+    in-out property <Screen> screen: Screen.consoles;
+
+    public function focus-session() {
+        session.focus-keys();
+    }
+
+    if root.screen == Screen.consoles: ConsolesScreen { }
+    if root.screen == Screen.pairing: PairingScreen { }
+    if root.screen == Screen.connecting: ConnectingScreen { }
+    session := SessionScreen {
+        visible: root.screen == Screen.session;
+    }
+    if root.screen == Screen.settings: SettingsScreen { }
+}

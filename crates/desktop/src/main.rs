@@ -1,9 +1,9 @@
-//! `tether`: desktop entry point. For now a CLI; the Slint UI arrives in
-//! milestone 5.
+//! `tether`: desktop entry point. With no subcommand it opens the Slint UI;
+//! the subcommands are a command-line interface to the same logic.
 
+mod app;
 mod stream;
 mod video;
-mod window;
 
 use std::io::{BufRead, Write};
 use std::net::{IpAddr, ToSocketAddrs};
@@ -12,8 +12,10 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
-use rp_core::{AccountId, Codec, ConsoleState, DiscoveryOptions, RegistRequest, Resolution, psn};
-use tether_core::{Config, ConsoleSecrets, PairedConsole, Store, WakeProgress};
+use rp_core::{AccountId, ConsoleState, DiscoveryOptions, RegistRequest, psn};
+use tether_core::{
+    Config, ConsoleSecrets, PairedConsole, Store, VideoCodec, VideoResolution, WakeProgress,
+};
 use tracing_subscriber::EnvFilter;
 
 /// Where the pairing code is on the console.
@@ -30,8 +32,9 @@ struct Cli {
     #[arg(short, long, action = clap::ArgAction::Count, global = true)]
     verbose: u8,
 
+    /// Without a subcommand, the app window opens.
     #[command(subcommand)]
-    command: Command,
+    command: Option<Command>,
 }
 
 #[derive(Subcommand)]
@@ -89,22 +92,24 @@ enum Command {
         #[arg(short, long, conflicts_with = "regist_key")]
         wait: bool,
     },
-    /// Stream a paired console in a window (waking it first if needed)
+    /// Open the app and stream a paired console (waking it first if
+    /// needed); quits when the session ends. Unset options come from the
+    /// app's settings.
     Stream {
         /// Name, address or ID of the paired console
         console: String,
 
         /// Video resolution
-        #[arg(short, long, value_enum, default_value_t = ResolutionArg::P720)]
-        resolution: ResolutionArg,
+        #[arg(short, long, value_enum)]
+        resolution: Option<ResolutionArg>,
 
         /// Frames per second (30 or 60)
-        #[arg(long, default_value_t = 60, value_parser = parse_fps)]
-        fps: u32,
+        #[arg(long, value_parser = parse_fps)]
+        fps: Option<u32>,
 
         /// Video codec
-        #[arg(long, value_enum, default_value_t = CodecArg::H264)]
-        codec: CodecArg,
+        #[arg(long, value_enum)]
+        codec: Option<CodecArg>,
     },
 }
 
@@ -161,7 +166,10 @@ fn init_logging(verbose: u8) {
         .init();
 }
 
-fn run(command: Command) -> Result<()> {
+fn run(command: Option<Command>) -> Result<()> {
+    let Some(command) = command else {
+        return app::run(app::Options::default());
+    };
     match command {
         Command::Discover { timeout, host } => discover(timeout, host),
         Command::Login { account_id } => login(account_id),
@@ -190,22 +198,22 @@ fn run(command: Command) -> Result<()> {
             resolution,
             fps,
             codec,
-        } => stream::run(
-            &console,
-            stream::StreamOptions {
-                resolution: match resolution {
-                    ResolutionArg::P360 => Resolution::P360,
-                    ResolutionArg::P540 => Resolution::P540,
-                    ResolutionArg::P720 => Resolution::P720,
-                    ResolutionArg::P1080 => Resolution::P1080,
-                },
+        } => app::run(app::Options {
+            stream: Some(console),
+            overrides: app::Overrides {
+                resolution: resolution.map(|r| match r {
+                    ResolutionArg::P360 => VideoResolution::P360,
+                    ResolutionArg::P540 => VideoResolution::P540,
+                    ResolutionArg::P720 => VideoResolution::P720,
+                    ResolutionArg::P1080 => VideoResolution::P1080,
+                }),
                 fps,
-                codec: match codec {
-                    CodecArg::H264 => Codec::H264,
-                    CodecArg::H265 => Codec::H265,
-                },
+                codec: codec.map(|c| match c {
+                    CodecArg::H264 => VideoCodec::H264,
+                    CodecArg::H265 => VideoCodec::H265,
+                }),
             },
-        ),
+        }),
     }
 }
 
