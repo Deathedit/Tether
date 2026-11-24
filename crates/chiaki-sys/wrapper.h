@@ -5,3 +5,4 @@
 #include <chiaki/log.h>
 #include <chiaki/discovery.h>
 #include <chiaki/discoveryservice.h>
+#include <chiaki/regist.h>

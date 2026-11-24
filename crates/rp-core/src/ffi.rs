@@ -27,23 +27,28 @@ pub(crate) fn log() -> *mut sys::ChiakiLog {
             tracing::error!(target: "chiaki", "chiaki_lib_init failed: {}", crate::Error::from_code(err));
         }
 
-        // VERBOSE is very chatty (per-packet). Only ask chiaki to format those
-        // messages when someone is listening at trace level.
-        let mut mask: u32 = sys::CHIAKI_LOG_ALL;
-        if !tracing::enabled!(target: "chiaki", tracing::Level::TRACE) {
-            // C enums are i32 on MSVC and u32 elsewhere, so the cast is
-            // needed on some targets only.
-            #[allow(clippy::unnecessary_cast)]
-            let verbose = sys::CHIAKI_LOG_VERBOSE as u32;
-            mask &= !verbose;
-        }
-
         let mut log = Box::new(sys::ChiakiLog::default());
         // SAFETY: `log` is a valid, boxed (stable address) ChiakiLog.
-        unsafe { sys::chiaki_log_init(&mut *log, mask, Some(log_cb), std::ptr::null_mut()) };
+        unsafe {
+            sys::chiaki_log_init(&mut *log, level_mask(), Some(log_cb), std::ptr::null_mut())
+        };
         GlobalLog(log)
     });
     &*log.0 as *const sys::ChiakiLog as *mut sys::ChiakiLog
+}
+
+/// Levels to ask chiaki for. VERBOSE is very chatty (per-packet), so it is
+/// only formatted when someone is listening at trace level.
+fn level_mask() -> u32 {
+    let mut mask: u32 = sys::CHIAKI_LOG_ALL;
+    if !tracing::enabled!(target: "chiaki", tracing::Level::TRACE) {
+        // C enums are i32 on MSVC and u32 elsewhere, so the cast is needed on
+        // some targets only.
+        #[allow(clippy::unnecessary_cast)]
+        let verbose = sys::CHIAKI_LOG_VERBOSE as u32;
+        mask &= !verbose;
+    }
+    mask
 }
 
 unsafe extern "C" fn log_cb(level: sys::ChiakiLogLevel, msg: *const c_char, _user: *mut c_void) {
@@ -52,6 +57,10 @@ unsafe extern "C" fn log_cb(level: sys::ChiakiLogLevel, msg: *const c_char, _use
     }
     // SAFETY: chiaki passes a null-terminated string valid for this call.
     let msg = unsafe { CStr::from_ptr(msg) }.to_string_lossy();
+    forward(level, &msg);
+}
+
+fn forward(level: sys::ChiakiLogLevel, msg: &str) {
     match level {
         sys::CHIAKI_LOG_ERROR => tracing::error!(target: "chiaki", "{msg}"),
         sys::CHIAKI_LOG_WARNING => tracing::warn!(target: "chiaki", "{msg}"),
@@ -60,6 +69,63 @@ unsafe extern "C" fn log_cb(level: sys::ChiakiLogLevel, msg: *const c_char, _use
         _ => tracing::trace!(target: "chiaki", "{msg}"),
     }
 }
+
+/// A log for one operation (e.g. a registration) that forwards to `tracing`
+/// like the global one and also keeps chiaki's error messages, so a failure
+/// can report why.
+pub(crate) struct CapturingLog {
+    log: sys::ChiakiLog,
+    errors: std::sync::Mutex<Vec<String>>,
+}
+
+impl CapturingLog {
+    pub(crate) fn new() -> Box<Self> {
+        log(); // make sure chiaki_lib_init ran
+        let mut this = Box::new(CapturingLog {
+            log: sys::ChiakiLog::default(),
+            errors: std::sync::Mutex::new(Vec::new()),
+        });
+        let user = &*this as *const CapturingLog as *mut c_void;
+        // SAFETY: `this` is boxed, so `user` stays valid as long as the box.
+        unsafe { sys::chiaki_log_init(&mut this.log, level_mask(), Some(capturing_cb), user) };
+        this
+    }
+
+    /// Pointer to hand to chiaki. Valid while `self` is alive.
+    pub(crate) fn as_ptr(&self) -> *mut sys::ChiakiLog {
+        &self.log as *const sys::ChiakiLog as *mut sys::ChiakiLog
+    }
+
+    pub(crate) fn errors(&self) -> Vec<String> {
+        self.errors.lock().unwrap().clone()
+    }
+}
+
+unsafe extern "C" fn capturing_cb(
+    level: sys::ChiakiLogLevel,
+    msg: *const c_char,
+    user: *mut c_void,
+) {
+    if msg.is_null() || user.is_null() {
+        return;
+    }
+    // SAFETY: chiaki passes a valid string; `user` is the CapturingLog that
+    // owns this ChiakiLog.
+    let (msg, this) = unsafe {
+        (
+            CStr::from_ptr(msg).to_string_lossy(),
+            &*(user as *const CapturingLog),
+        )
+    };
+    forward(level, &msg);
+    if level == sys::CHIAKI_LOG_ERROR {
+        this.errors.lock().unwrap().push(msg.into_owned());
+    }
+}
+
+// SAFETY: chiaki only reads the ChiakiLog fields; the error list is a Mutex.
+unsafe impl Send for CapturingLog {}
+unsafe impl Sync for CapturingLog {}
 
 /// Copies a nullable C string into an owned `String`.
 ///

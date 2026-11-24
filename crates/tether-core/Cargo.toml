@@ -1,0 +1,24 @@
+[package]
+name = "tether-core"
+description = "Tether's shared app logic: settings, paired consoles, secrets, sessions"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+directories.workspace = true
+hex.workspace = true
+rp-core.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+toml.workspace = true
+tracing.workspace = true
+
+# Desktop secrets: Windows Credential Manager / Secret Service. Android keeps
+# secrets in the Keystore on the Kotlin side instead.
+[target.'cfg(any(windows, target_os = "linux", target_os = "macos"))'.dependencies]
+keyring.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

@@ -8,18 +8,39 @@ See [STACK.md](STACK.md) for the architecture and milestones.
 
 ## Status
 
-Milestone 1 (discover): `tether discover` lists consoles on the LAN, and
-`tether wake` wakes one from rest mode.
+Milestones 1 (discover) and 2 (pair) — command line only so far:
+
+```
+tether discover              # consoles on the LAN, and whether they're paired
+tether login                 # sign in to PSN once (gets your account ID)
+tether pair 192.168.1.20     # pair using the 8-digit code the console shows
+tether consoles              # paired consoles
+tether wake "Living Room"    # wake a paired console from rest mode
+tether unpair "Living Room"
+```
 
 ```
 $ tether discover
-NAME         ADDRESS       STATE
-Living Room  192.168.1.20  ready
+NAME         ADDRESS       STATE  PAIRED
+Living Room  192.168.1.20  ready  yes
 ```
 
-`tether wake <host> --regist-key <hex>` needs the registration key that
-pairing produces. Pairing comes in milestone 2; until then you can take the key
-from an existing chiaki-ng setup.
+To pair, turn the console on and open **Settings > System > Remote Play >
+Link Device**; it shows the code for a few minutes.
+
+`tether login` opens Sony's sign-in page in your browser. After you sign in
+the browser ends on a blank page; paste that page's address back into the
+terminal. Only the numeric account ID is kept. If you already use chiaki-ng,
+`tether login --account-id <base64>` takes its account ID directly.
+
+Where things are stored:
+
+- `config.toml` (account ID, paired consoles): `~/.config/tether/` on Linux,
+  `%APPDATA%\tether\config\` on Windows.
+- Console keys: the system credential store (Windows Credential Manager, or
+  the Secret Service, i.e. gnome-keyring or KWallet, on Linux). Without a
+  keyring daemon they go to `secrets.toml` next to `config.toml`, readable
+  only by you.
 
 ## Building
 
@@ -95,6 +116,7 @@ environment variables to the full paths.
 ```
 third_party/chiaki-ng/   git submodule, pinned to v1.10.1
 crates/chiaki-sys/       builds chiaki-ng's lib/ with CMake, bindgen bindings
-crates/rp-core/          safe Rust API: discovery, wake (more to come)
+crates/rp-core/          safe Rust API: discovery, wake, registration, PSN sign-in
+crates/tether-core/      app logic: config file, paired consoles, secret storage
 crates/desktop/          the `tether` binary (CLI now, Slint UI later)
 ```

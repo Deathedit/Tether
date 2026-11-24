@@ -16,6 +16,27 @@ pub enum Error {
     #[error("invalid host name: {0}")]
     InvalidHost(String),
 
+    #[error("invalid pairing code: expected the 8 digits shown on the console")]
+    InvalidPin,
+
+    #[error("invalid PSN account ID: expected 8 bytes encoded as base64")]
+    InvalidAccountId,
+
+    #[error("no sign-in code found: paste the full URL the browser ended up on")]
+    InvalidRedirect,
+
+    #[error("PSN sign-in failed: {0}")]
+    Psn(String),
+
+    #[error("registration failed: {reason}")]
+    RegistrationFailed { reason: String },
+
+    #[error("canceled")]
+    Canceled,
+
+    #[error("not supported: {0}")]
+    Unsupported(&'static str),
+
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }

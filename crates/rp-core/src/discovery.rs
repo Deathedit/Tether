@@ -14,6 +14,7 @@ use crossbeam_channel::{Receiver, Sender};
 
 use crate::error::{Result, check};
 use crate::ffi;
+use crate::target::Target;
 
 /// Whether a console is on or in rest mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -67,6 +68,8 @@ pub struct Console {
     pub addr: IpAddr,
     pub state: ConsoleState,
     pub kind: ConsoleKind,
+    /// Protocol variant, from the console kind and firmware version.
+    pub target: Target,
     /// Raw `host-type` value as reported by the console.
     pub host_type: Option<String>,
     pub system_version: Option<String>,
@@ -87,6 +90,17 @@ impl Console {
         let app_name = unsafe { ffi::opt_string(host.running_app_name) };
         // SAFETY: valid host pointer; the function only reads it.
         let is_ps5 = unsafe { sys::chiaki_discovery_host_is_ps5(host) };
+        let target = if host.system_version.is_null() {
+            // chiaki's version parser would call atoi(NULL).
+            if is_ps5 {
+                Target::PS5_1
+            } else {
+                Target::PS4_UNKNOWN
+            }
+        } else {
+            // SAFETY: valid host with a non-null system_version.
+            Target::from_sys(unsafe { sys::chiaki_discovery_host_system_version_target(host) })
+        };
 
         Some(Console {
             host_id,
@@ -98,6 +112,7 @@ impl Console {
             } else {
                 ConsoleKind::Ps4
             },
+            target,
             host_type: unsafe { ffi::opt_string(host.host_type) },
             system_version: unsafe { ffi::opt_string(host.system_version) },
             request_port: host.host_request_port,

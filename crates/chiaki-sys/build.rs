@@ -134,6 +134,9 @@ fn build_chiaki(chiaki_dir: &Path) -> PathBuf {
         ("CHIAKI_USE_SYSTEM_JERASURE", "OFF"),
         ("CHIAKI_USE_SYSTEM_NANOPB", "OFF"),
         ("CHIAKI_USE_SYSTEM_CURL", "OFF"),
+        // nanopb switches MSVC builds to the static CRT (/MT) by default;
+        // Rust links the dynamic one (/MD), and mixing them breaks linking.
+        ("nanopb_MSVC_STATIC_RUNTIME", "OFF"),
     ] {
         cfg.define(key, value);
     }

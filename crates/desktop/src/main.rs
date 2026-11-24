@@ -1,14 +1,19 @@
 //! `tether`: desktop entry point. For now a CLI; the Slint UI arrives in
 //! milestone 5.
 
+use std::io::{BufRead, Write};
 use std::net::{IpAddr, ToSocketAddrs};
 use std::process::ExitCode;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
-use rp_core::{Console, DiscoveryOptions};
+use rp_core::{AccountId, ConsoleState, DiscoveryOptions, RegistRequest, psn};
+use tether_core::{Config, Store};
 use tracing_subscriber::EnvFilter;
+
+/// Where the pairing code is on the console.
+const PAIR_SCREEN: &str = "Settings > System > Remote Play > Link Device";
 
 #[derive(Parser)]
 #[command(
@@ -37,17 +42,43 @@ enum Command {
         #[arg(long)]
         host: Option<String>,
     },
+    /// Sign in to PSN once to get the account ID that pairing needs
+    Login {
+        /// Set the account ID directly (base64, e.g. from chiaki-ng) instead of signing in
+        #[arg(long)]
+        account_id: Option<String>,
+    },
+    /// Pair with a console using the 8-digit code it shows
+    Pair {
+        /// IP address or host name of the console
+        console: String,
+
+        /// The 8-digit code from the console (asked for if omitted)
+        #[arg(long)]
+        pin: Option<String>,
+
+        /// PSN account ID (base64) to use instead of the one from `tether login`
+        #[arg(long)]
+        account_id: Option<String>,
+    },
+    /// List paired consoles
+    Consoles,
+    /// Forget a paired console and its keys
+    Unpair {
+        /// Name, address or ID of the paired console
+        console: String,
+    },
     /// Wake a console from rest mode
     Wake {
-        /// IP address or host name of the console
-        host: String,
+        /// Name, address or ID of a paired console, or any address with --regist-key
+        console: String,
 
-        /// Registration key from pairing (up to 8 hex digits)
+        /// Registration key (up to 8 hex digits) for a console Tether hasn't paired with
         #[arg(short = 'k', long)]
-        regist_key: String,
+        regist_key: Option<String>,
 
-        /// The console is a PS4 (uses the PS4 wake port)
-        #[arg(long)]
+        /// With --regist-key: the console is a PS4 (uses the PS4 wake port)
+        #[arg(long, requires = "regist_key")]
         ps4: bool,
     },
 }
@@ -81,32 +112,204 @@ fn init_logging(verbose: u8) {
 
 fn run(command: Command) -> Result<()> {
     match command {
-        Command::Discover { timeout, host } => {
-            if !(timeout.is_finite() && timeout > 0.0) {
-                bail!("--timeout must be a positive number of seconds");
-            }
-            let options = DiscoveryOptions {
-                host: host.as_deref().map(resolve).transpose()?,
-                ..Default::default()
-            };
-            let consoles = rp_core::discover(Duration::from_secs_f64(timeout), &options)?;
-            if consoles.is_empty() {
-                eprintln!("No consoles found.");
-            } else {
-                print!("{}", format_table(&consoles));
+        Command::Discover { timeout, host } => discover(timeout, host),
+        Command::Login { account_id } => login(account_id),
+        Command::Pair {
+            console,
+            pin,
+            account_id,
+        } => pair(&console, pin, account_id),
+        Command::Consoles => consoles(),
+        Command::Unpair { console } => {
+            let mut store = Store::open_default()?;
+            match store.remove(&console)? {
+                Some(c) => println!("Forgot {} ({}).", c.name, c.host_id),
+                None => bail!("no paired console matches {console:?}"),
             }
             Ok(())
         }
         Command::Wake {
-            host,
+            console,
             regist_key,
             ps4,
-        } => {
-            rp_core::wake(&host, &regist_key, !ps4)?;
-            println!("Wake-up packet sent to {host}.");
-            Ok(())
-        }
+        } => wake(&console, regist_key, ps4),
     }
+}
+
+fn discover(timeout: f64, host: Option<String>) -> Result<()> {
+    if !(timeout.is_finite() && timeout > 0.0) {
+        bail!("--timeout must be a positive number of seconds");
+    }
+    let options = DiscoveryOptions {
+        host: host.as_deref().map(resolve).transpose()?,
+        ..Default::default()
+    };
+    let found = rp_core::discover(Duration::from_secs_f64(timeout), &options)?;
+    if found.is_empty() {
+        eprintln!("No consoles found.");
+        return Ok(());
+    }
+    // Only the config file is needed here; skip the credential store.
+    let config = Config::load(&Store::default_dir()?.join("config.toml")).unwrap_or_default();
+    let rows = found
+        .iter()
+        .map(|c| {
+            let paired = config
+                .consoles
+                .iter()
+                .any(|p| p.host_id.eq_ignore_ascii_case(&c.host_id));
+            vec![
+                c.name.clone(),
+                c.addr.to_string(),
+                c.state.to_string(),
+                if paired { "yes" } else { "no" }.into(),
+            ]
+        })
+        .collect();
+    print!("{}", table(&["NAME", "ADDRESS", "STATE", "PAIRED"], rows));
+    Ok(())
+}
+
+fn login(account_id: Option<String>) -> Result<()> {
+    let mut store = Store::open_default()?;
+    let id: AccountId = match account_id {
+        Some(s) => s.parse()?,
+        None => {
+            let url = psn::login_url();
+            eprintln!(
+                "1. Sign in to PSN in your browser. If no browser window opened, open this link:\n\n   {url}\n\n\
+                 2. After signing in, the browser lands on a blank or error page. Copy that\n   \
+                 page's full address from the address bar and paste it below.\n"
+            );
+            let _ = open::that_detached(&url);
+            let input = prompt("Address: ")?;
+            let code = psn::parse_redirect(&input)?;
+            psn::fetch_account_id(&code)?
+        }
+    };
+    store.set_account_id(id)?;
+    println!("PSN account ID: {id}");
+    println!("Saved to {}", store.config_path().display());
+    Ok(())
+}
+
+fn pair(console: &str, pin: Option<String>, account_id: Option<String>) -> Result<()> {
+    let mut store = Store::open_default()?;
+    let account_id: AccountId = match account_id {
+        Some(s) => {
+            let id = s.parse()?;
+            if store.account_id()?.is_none() {
+                store.set_account_id(id)?;
+            }
+            id
+        }
+        None => store
+            .account_id()?
+            .context("no PSN account ID yet: run `tether login` first, or pass --account-id")?,
+    };
+
+    let ip = resolve(console)?;
+    let options = DiscoveryOptions {
+        host: Some(ip),
+        ..Default::default()
+    };
+    let found = rp_core::discover(Duration::from_secs(3), &options)?
+        .into_iter()
+        .next()
+        .with_context(|| {
+            format!("no console answered at {ip}. Is it on and on the same network?")
+        })?;
+    if found.state == ConsoleState::Standby {
+        bail!(
+            "{} is in rest mode. Turn it on, then open {PAIR_SCREEN}.",
+            found.name
+        );
+    }
+
+    let pin = match pin {
+        Some(p) => rp_core::parse_pin(&p)?,
+        None => {
+            eprintln!(
+                "On {}, open {PAIR_SCREEN} and keep the code on screen.",
+                found.name
+            );
+            rp_core::parse_pin(&prompt("8-digit code: ")?)?
+        }
+    };
+
+    eprintln!("Pairing with {} at {ip}...", found.name);
+    let registered = rp_core::register(&RegistRequest {
+        host: ip.to_string(),
+        target: found.target,
+        account_id,
+        pin,
+    })?;
+    let paired = store.add_paired(&registered, &found.name, &ip.to_string())?;
+    println!("Paired with {} ({}).", paired.name, paired.host_id);
+    println!("Keys saved to the {}.", store.secret_store().describe());
+    Ok(())
+}
+
+fn consoles() -> Result<()> {
+    let store = Store::open_default()?;
+    if store.paired().is_empty() {
+        eprintln!("No paired consoles. Pair one with `tether pair <address>`.");
+        return Ok(());
+    }
+    let rows = store
+        .paired()
+        .iter()
+        .map(|c| {
+            vec![
+                c.name.clone(),
+                c.address.clone(),
+                c.host_id.clone(),
+                c.target().to_string(),
+            ]
+        })
+        .collect();
+    print!("{}", table(&["NAME", "ADDRESS", "ID", "TYPE"], rows));
+    Ok(())
+}
+
+fn wake(console: &str, regist_key: Option<String>, ps4: bool) -> Result<()> {
+    if let Some(key) = regist_key {
+        rp_core::wake(console, &key, !ps4)?;
+        println!("Wake-up packet sent to {console}.");
+        return Ok(());
+    }
+    let store = Store::open_default()?;
+    let paired = store.find(console).with_context(|| {
+        format!("{console:?} is not paired. Pair it first, or pass --regist-key.")
+    })?;
+    let secrets = store.secrets_for(paired)?.with_context(|| {
+        format!(
+            "keys for {} are missing from the {}; pair it again",
+            paired.name,
+            store.secret_store().describe()
+        )
+    })?;
+    rp_core::wake(
+        &paired.address,
+        &secrets.regist_key_hex(),
+        paired.target().is_ps5(),
+    )?;
+    println!(
+        "Wake-up packet sent to {} ({}).",
+        paired.name, paired.address
+    );
+    Ok(())
+}
+
+/// Reads one line from stdin after printing `label` to stderr.
+fn prompt(label: &str) -> Result<String> {
+    eprint!("{label}");
+    std::io::stderr().flush().ok();
+    let mut line = String::new();
+    if std::io::stdin().lock().read_line(&mut line)? == 0 {
+        bail!("no input");
+    }
+    Ok(line.trim().to_owned())
 }
 
 /// Parses an IP address or resolves a host name, preferring IPv4.
@@ -127,24 +330,31 @@ fn resolve(host: &str) -> Result<IpAddr> {
         .with_context(|| format!("{host} has no addresses"))
 }
 
-fn format_table(consoles: &[Console]) -> String {
-    let rows: Vec<[String; 3]> = consoles
-        .iter()
-        .map(|c| [c.name.clone(), c.addr.to_string(), c.state.to_string()])
+/// Left-aligned columns separated by two spaces; the last column is not padded.
+fn table(header: &[&str], rows: Vec<Vec<String>>) -> String {
+    let widths: Vec<usize> = (0..header.len())
+        .map(|i| {
+            rows.iter()
+                .map(|r| r[i].chars().count())
+                .chain([header[i].len()])
+                .max()
+                .unwrap()
+        })
         .collect();
-    let header = ["NAME", "ADDRESS", "STATE"];
-    let width = |col: usize| {
-        rows.iter()
-            .map(|r| r[col].chars().count())
-            .chain([header[col].len()])
-            .max()
-            .unwrap()
+    let line = |cells: Vec<&str>| {
+        let mut out = String::new();
+        for (i, cell) in cells.iter().enumerate() {
+            if i + 1 == cells.len() {
+                out += cell;
+            } else {
+                out += &format!("{cell:<w$}  ", w = widths[i]);
+            }
+        }
+        out + "\n"
     };
-    let (w0, w1) = (width(0), width(1));
-
-    let mut out = format!("{:<w0$}  {:<w1$}  {}\n", header[0], header[1], header[2]);
-    for [name, addr, state] in &rows {
-        out += &format!("{name:<w0$}  {addr:<w1$}  {state}\n");
+    let mut out = line(header.to_vec());
+    for row in &rows {
+        out += &line(row.iter().map(String::as_str).collect());
     }
     out
 }
@@ -152,30 +362,15 @@ fn format_table(consoles: &[Console]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rp_core::{ConsoleKind, ConsoleState};
-
-    fn console(name: &str, ip: &str, state: ConsoleState) -> Console {
-        Console {
-            host_id: "id".into(),
-            name: name.into(),
-            addr: ip.parse().unwrap(),
-            state,
-            kind: ConsoleKind::Ps5,
-            host_type: None,
-            system_version: None,
-            request_port: 997,
-            running_app: None,
-        }
-    }
 
     #[test]
     fn table_layout() {
-        let table = format_table(&[
-            console("Living Room", "192.168.1.20", ConsoleState::Ready),
-            console("Den", "10.0.0.5", ConsoleState::Standby),
-        ]);
+        let rows = vec![
+            vec!["Living Room".into(), "192.168.1.20".into(), "ready".into()],
+            vec!["Den".into(), "10.0.0.5".into(), "rest mode".into()],
+        ];
         assert_eq!(
-            table,
+            table(&["NAME", "ADDRESS", "STATE"], rows),
             "NAME         ADDRESS       STATE\n\
              Living Room  192.168.1.20  ready\n\
              Den          10.0.0.5      rest mode\n"
@@ -188,5 +383,11 @@ mod tests {
             resolve("192.168.1.20").unwrap(),
             "192.168.1.20".parse::<IpAddr>().unwrap()
         );
+    }
+
+    #[test]
+    fn cli_parses() {
+        use clap::CommandFactory;
+        Cli::command().debug_assert();
     }
 }

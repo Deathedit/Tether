@@ -57,9 +57,14 @@ jobs:
       - name: Install vcpkg packages
         shell: pwsh
         run: |
-          # The runner's vcpkg clone can be older than our builtin-baseline.
-          git -C "$env:VCPKG_INSTALLATION_ROOT" fetch --quiet origin master
-          & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install --triplet $env:VCPKG_TRIPLET
+          # Use vcpkg at exactly our builtin-baseline; the runner's own clone
+          # is often older and lacks the port versions the baseline names.
+          $baseline = (Get-Content vcpkg.json | ConvertFrom-Json).'builtin-baseline'
+          $root = "$env:RUNNER_TEMP\vcpkg"
+          git clone --quiet --filter=blob:none https://github.com/microsoft/vcpkg.git $root
+          git -C $root checkout --quiet $baseline
+          & "$root\bootstrap-vcpkg.bat" -disableMetrics
+          & "$root\vcpkg.exe" install --triplet $env:VCPKG_TRIPLET
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
