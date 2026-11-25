@@ -252,7 +252,13 @@ fun PairScreen(
             }
         }
         Spacer(Modifier.height(10.dp))
-        field(address, { address = it }, "Console IP address", KeyboardType.Uri)
+        // IPv4 only: digits and dots, at most "255.255.255.255".
+        field(
+            address,
+            { address = it.filter { c -> c.isDigit() || c == '.' }.take(15) },
+            "Console IP address",
+            KeyboardType.Decimal,
+        )
         Spacer(Modifier.height(8.dp))
         field(code, { code = it.filter(Char::isDigit).take(8) }, "8-digit code", KeyboardType.NumberPassword)
         Spacer(Modifier.height(12.dp))
