@@ -339,8 +339,8 @@ impl Tether {
     }
 
     /// One network round trip to the console at `address`, in milliseconds,
-    /// or `None` if it didn't answer within half a second. For the home
-    /// screen's latency graph (before a stream gives better numbers).
+    /// or `None` if it didn't answer (e.g. it's in rest mode). For the home
+    /// screen's latency graph.
     pub fn probe_latency(&self, address: String) -> Option<f32> {
         probe_latency(&address)
     }
@@ -393,28 +393,30 @@ impl Tether {
     }
 }
 
-/// Times one discovery request/reply to the console's discovery port.
+/// The console's Remote Play control port; open while the console is on.
+const CONTROL_PORT: u16 = 9295;
+
+/// Times a TCP connection to the console's control port: the network stack
+/// answers right away (accept, or refuse), so this is the network round
+/// trip. (Discovery replies are no good for this: the console delays them by
+/// about 100 ms.) `None` if nothing answers in time, e.g. in rest mode.
 fn probe_latency(address: &str) -> Option<f32> {
-    use std::net::{SocketAddr, UdpSocket};
+    use std::net::{SocketAddr, TcpStream};
     let ip: IpAddr = address.trim().parse().ok()?;
-    let target = SocketAddr::new(ip, 9302);
-    let socket = UdpSocket::bind(if ip.is_ipv4() { "0.0.0.0:0" } else { "[::]:0" }).ok()?;
-    socket
-        .set_read_timeout(Some(Duration::from_millis(500)))
-        .ok()?;
     let started = std::time::Instant::now();
-    socket
-        .send_to(
-            b"SRCH * HTTP/1.1\ndevice-discovery-protocol-version:00030010\n",
-            target,
-        )
-        .ok()?;
-    let mut buf = [0u8; 512];
-    loop {
-        let (_, from) = socket.recv_from(&mut buf).ok()?;
-        if from.ip() == ip {
-            return Some(started.elapsed().as_secs_f32() * 1000.0);
+    match TcpStream::connect_timeout(
+        &SocketAddr::new(ip, CONTROL_PORT),
+        Duration::from_millis(400),
+    ) {
+        Ok(stream) => {
+            let ms = started.elapsed().as_secs_f32() * 1000.0;
+            drop(stream);
+            Some(ms)
         }
+        Err(e) if e.kind() == std::io::ErrorKind::ConnectionRefused => {
+            Some(started.elapsed().as_secs_f32() * 1000.0)
+        }
+        Err(_) => None,
     }
 }
 
@@ -476,16 +478,13 @@ mod tests {
 
     #[test]
     fn latency_probe_against_fake_console() {
-        let console = std::net::UdpSocket::bind("127.0.0.1:9302").expect("port 9302 free");
-        let responder = std::thread::spawn(move || {
-            let mut buf = [0u8; 512];
-            let (n, from) = console.recv_from(&mut buf).unwrap();
-            assert!(buf[..n].starts_with(b"SRCH"));
-            console.send_to(b"HTTP/1.1 200 Ok\n", from).unwrap();
+        let listener = std::net::TcpListener::bind("127.0.0.1:9295").expect("port 9295 free");
+        let accepter = std::thread::spawn(move || {
+            let _ = listener.accept();
         });
         let ms = probe_latency("127.0.0.1").expect("fake console answers");
-        responder.join().unwrap();
-        assert!((0.0..500.0).contains(&ms));
+        accepter.join().unwrap();
+        assert!((0.0..400.0).contains(&ms));
         assert_eq!(probe_latency("not an ip"), None);
     }
 }
