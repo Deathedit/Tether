@@ -10,7 +10,8 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.0"
+# The one version for every target; the Android app reads it from here too.
+version = "0.2.0"
 edition = "2024"
 license = "AGPL-3.0-only"
 rust-version = "1.85"

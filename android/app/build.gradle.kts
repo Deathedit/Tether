@@ -4,6 +4,12 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+// One version for all of Tether: [workspace.package] version in Cargo.toml.
+val tetherVersion: String = Regex("""(?m)^version\s*=\s*"([^"]+)"""")
+    .find(rootProject.file("../Cargo.toml").readText())!!.groupValues[1]
+val tetherVersionCode: Int = tetherVersion.substringBefore('-').split('.')
+    .map { it.toInt() }.let { (major, minor, patch) -> major * 10000 + minor * 100 + patch }
+
 android {
     namespace = "io.github.deathedit.tether"
     compileSdk = 35
@@ -13,8 +19,8 @@ android {
         // Android 11: MediaCodec low-latency mode and the AYN Thor's OS.
         minSdk = 30
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.2.0"
+        versionCode = tetherVersionCode
+        versionName = tetherVersion
         ndk {
             // Built by ../build-rust.sh into src/main/jniLibs.
             abiFilters += listOf("arm64-v8a", "x86_64")
@@ -32,11 +38,29 @@ android {
             keyAlias = "androiddebugkey"
             keyPassword = "android"
         }
+        // The release key is a secret: CI writes it from GitHub secrets and
+        // passes its path and passwords in these variables. Without them the
+        // release APK is built unsigned.
+        val releaseKeystore = System.getenv("TETHER_KEYSTORE")
+        if (!releaseKeystore.isNullOrEmpty()) {
+            create("release") {
+                storeFile = file(releaseKeystore)
+                storePassword = System.getenv("TETHER_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("TETHER_KEY_ALIAS")
+                keyPassword = System.getenv("TETHER_KEY_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
+            signingConfig = signingConfigs.findByName("release")
         }
     }
 

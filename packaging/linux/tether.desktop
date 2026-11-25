@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Tether
+GenericName=Remote Play
+Comment=Remote Play client. Works with PS5.
+Exec=tether
+Icon=tether
+Terminal=false
+Categories=Game;
+Keywords=remote;play;stream;console;

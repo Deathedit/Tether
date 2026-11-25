@@ -1,0 +1,252 @@
+name: Release
+
+# Pushing a tag vX.Y.Z builds every target and creates a draft GitHub Release
+# with them. Running it by hand (Actions > Release > Run workflow) on any
+# branch is a dry run: the same builds, uploaded as workflow artifacts only.
+on:
+  push:
+    tags: ["v*"]
+    # A milestone branch that changes the packaging gets a dry run too.
+    branches: ["milestone-*"]
+    paths:
+      - .github/workflows/release.yml
+      - packaging/**
+      - flake.nix
+      - android/app/build.gradle.kts
+      - android/app/proguard-rules.pro
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  version:
+    name: Check version
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: version
+        run: |
+          # [workspace.package] version is the one version for every target.
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)
+          pkgver=$(sed -n 's/^pkgver=//p' packaging/arch/PKGBUILD)
+          echo "Cargo.toml: $version, PKGBUILD: $pkgver"
+          if [ "$pkgver" != "$version" ]; then
+            echo "::error::packaging/arch/PKGBUILD pkgver ($pkgver) differs from Cargo.toml ($version)"
+            exit 1
+          fi
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::tag $GITHUB_REF_NAME doesn't match Cargo.toml version $version"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  windows:
+    name: Windows zip
+    needs: version
+    runs-on: windows-latest
+    env:
+      VCPKG_TRIPLET: x64-windows-static-md
+      FFMPEG_DIR: ${{ github.workspace }}\vcpkg_installed\x64-windows-static-md
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install protobuf
+      - uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Same cache key as CI, so a release reuses main's vcpkg build.
+      - name: Cache vcpkg packages
+        id: vcpkg-cache
+        uses: actions/cache@v4
+        with:
+          path: vcpkg_installed
+          key: vcpkg-${{ env.VCPKG_TRIPLET }}-${{ hashFiles('vcpkg.json') }}
+      - name: Install vcpkg packages
+        if: steps.vcpkg-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $baseline = (Get-Content vcpkg.json | ConvertFrom-Json).'builtin-baseline'
+          $root = "$env:RUNNER_TEMP\vcpkg"
+          git clone --quiet --filter=blob:none https://github.com/microsoft/vcpkg.git $root
+          git -C $root checkout --quiet $baseline
+          & "$root\bootstrap-vcpkg.bat" -disableMetrics
+          & "$root\vcpkg.exe" install --triplet $env:VCPKG_TRIPLET
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p tether-desktop
+
+      - name: Zip
+        shell: pwsh
+        run: |
+          $dir = "tether-$env:VERSION-windows-x86_64"
+          New-Item -ItemType Directory $dir | Out-Null
+          Copy-Item target/release/tether.exe, LICENSE, README.md $dir
+          Copy-Item -Recurse docs $dir
+          Compress-Archive -Path $dir -DestinationPath "$dir.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-windows
+          path: tether-*-windows-x86_64.zip
+
+  android:
+    name: Android APK
+    needs: version
+    runs-on: ubuntu-24.04
+    env:
+      NDK_VERSION: 28.2.13676358
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Check out chiaki-ng's library submodules
+        run: |
+          git -C third_party/chiaki-ng submodule update --init --depth 1 \
+            third-party/nanopb third-party/jerasure third-party/gf-complete third-party/curl
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            protobuf-compiler python3-protobuf libclang-dev
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Install Android SDK platform and NDK
+        run: |
+          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" \
+            "platforms;android-35" "build-tools;35.0.0" "ndk;$NDK_VERSION"
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android, x86_64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: android
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
+      - name: Build the Rust core and Kotlin bindings
+        run: sh android/build-rust.sh
+
+      # The release key lives in GitHub secrets (see docs/building.md). A tag
+      # build must be signed; a dry run without the secrets builds unsigned.
+      - name: Write the release key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.TETHER_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+            echo "TETHER_KEYSTORE=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
+          elif [ "$GITHUB_REF_TYPE" = tag ]; then
+            echo "::error::TETHER_KEYSTORE_BASE64 secret is missing; a release APK must be signed"
+            exit 1
+          else
+            echo "::warning::No release key in secrets; building an unsigned APK"
+          fi
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.14.3"
+      - name: Build the APK
+        env:
+          TETHER_KEYSTORE_PASSWORD: ${{ secrets.TETHER_KEYSTORE_PASSWORD }}
+          TETHER_KEY_ALIAS: ${{ secrets.TETHER_KEY_ALIAS }}
+          TETHER_KEY_PASSWORD: ${{ secrets.TETHER_KEY_PASSWORD }}
+        run: |
+          gradle --project-dir android assembleRelease
+          out=android/app/build/outputs/apk/release
+          if [ -f "$out/app-release.apk" ]; then
+            cp "$out/app-release.apk" "tether-$VERSION-android.apk"
+          else
+            cp "$out/app-release-unsigned.apk" "tether-$VERSION-android-unsigned.apk"
+          fi
+          rm -f "$RUNNER_TEMP/release.keystore"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-android
+          path: tether-*-android*.apk
+
+  nix:
+    # Not a release file: NixOS users install from the flake. This checks
+    # that the package builds in the Nix sandbox.
+    name: Nix package
+    needs: version
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: cachix/install-nix-action@v31
+      - run: nix build -L .#tether
+      - run: ls -lR result/
+
+  arch:
+    name: Arch package
+    needs: version
+    runs-on: ubuntu-24.04
+    container: archlinux:base-devel
+    steps:
+      - name: Install git
+        run: pacman -Syu --noconfirm --needed git
+      - uses: actions/checkout@v4
+        with:
+          # makepkg clones this checkout, so it needs real history.
+          fetch-depth: 0
+      - name: Build with makepkg
+        shell: bash
+        run: |
+          # The PKGBUILD builds a published tag from GitHub; build this
+          # commit from the local checkout instead.
+          git config --system --add safe.directory '*'
+          useradd -m builder
+          cp -r packaging/arch /home/builder/pkg
+          cd /home/builder/pkg
+          sed -i "s|^  \"\$pkgname::git+\$url.git#tag=v\$pkgver\"|  \"\$pkgname::git+file://$GITHUB_WORKSPACE#commit=$GITHUB_SHA\"|" PKGBUILD
+          grep -q "file://" PKGBUILD
+          . ./PKGBUILD
+          pacman -S --noconfirm --needed "${depends[@]}" "${makedepends[@]}"
+          chown -R builder: .
+          su builder -c 'makepkg --noconfirm'
+          # Not the tether-debug package.
+          cp tether-[0-9]*.pkg.tar.zst "$GITHUB_WORKSPACE/"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-arch
+          path: tether-*.pkg.tar.zst
+
+  release:
+    name: GitHub Release
+    if: github.ref_type == 'tag'
+    needs: [version, windows, android, nix, arch]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+      - name: Create a draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          ls -l dist
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" --draft --generate-notes \
+            --title "Tether $VERSION"

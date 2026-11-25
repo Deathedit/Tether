@@ -11,6 +11,9 @@
 //!   Needs the NDK (`ANDROID_NDK_HOME`, as set by cargo-ndk) and a Unix-like
 //!   build host, since OpenSSL builds with its own Configure script and make.
 //!
+//! curl is the copy bundled with chiaki-ng, except on Linux when the system
+//! has curl 8.11 or newer (see `use_system_curl`).
+//!
 //! Build tools needed on every platform: CMake, a C compiler, Python 3 with the
 //! `protobuf` package, `protoc` (for nanopb) and libclang (for bindgen).
 
@@ -38,6 +41,10 @@ const ANDROID_MIN_API: &str = "30";
 /// `libssl` is needed on Linux, where the bundled curl uses OpenSSL for TLS
 /// (on Windows it uses Schannel, and linking libssl there is harmless).
 const PKG_CONFIG_LIBS: &[&str] = &["libssl", "libcrypto", "libevent", "json-c", "miniupnpc"];
+
+/// The first curl with WebSocket support built in by default, which chiaki-ng
+/// needs from a system curl.
+const SYSTEM_CURL_MIN: &str = "8.11";
 
 fn main() {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
@@ -73,6 +80,7 @@ fn main() {
         "ANDROID_NDK_HOME",
         "ANDROID_NDK_ROOT",
         "CARGO_NDK_ANDROID_PLATFORM",
+        "TETHER_SYSTEM_CURL",
     ] {
         println!("cargo:rerun-if-env-changed={var}");
     }
@@ -82,16 +90,45 @@ fn main() {
     }
     let android = (target_os == "android").then(Android::from_env);
 
-    let build_dir = build_chiaki(&chiaki_dir, android.as_ref());
-    link_cmake_libs(&build_dir, &target_os, CMAKE_LIBS);
+    let system_curl = use_system_curl(&target_os);
+
+    let build_dir = build_chiaki(&chiaki_dir, android.as_ref(), system_curl);
+    let cmake_libs: Vec<&str> = CMAKE_LIBS
+        .iter()
+        .copied()
+        .filter(|lib| !(system_curl && *lib == "libcurl"))
+        .collect();
+    link_cmake_libs(&build_dir, &target_os, &cmake_libs);
     let include_paths = if android.is_some() {
         link_cmake_libs(&build_dir, &target_os, ANDROID_DEP_LIBS);
         Vec::new()
     } else {
-        link_pkg_config_libs(&target_os)
+        let mut libs = PKG_CONFIG_LIBS.to_vec();
+        if system_curl {
+            libs.push("libcurl");
+        }
+        link_pkg_config_libs(&target_os, &libs)
     };
     link_system_libs(&target_os);
     generate_bindings(&chiaki_dir, &build_dir, &include_paths, android.as_ref());
+}
+
+/// Whether to build chiaki-ng against the system's libcurl instead of the
+/// copy it bundles (curl 8.11.1, which doesn't compile against OpenSSL 4, as
+/// on Arch). Linux uses the system one when pkg-config finds a new enough
+/// libcurl; `TETHER_SYSTEM_CURL=1` or `=0` forces the choice.
+fn use_system_curl(target_os: &str) -> bool {
+    match env::var("TETHER_SYSTEM_CURL").as_deref() {
+        Ok("1") => return true,
+        Ok("0") => return false,
+        _ => {}
+    }
+    target_os == "linux"
+        && pkg_config::Config::new()
+            .atleast_version(SYSTEM_CURL_MIN)
+            .cargo_metadata(false)
+            .probe("libcurl")
+            .is_ok()
 }
 
 /// Android NDK settings for an Android target.
@@ -169,7 +206,7 @@ fn setup_vcpkg(workspace_dir: &Path) {
     }
 }
 
-fn build_chiaki(chiaki_dir: &Path, android: Option<&Android>) -> PathBuf {
+fn build_chiaki(chiaki_dir: &Path, android: Option<&Android>, system_curl: bool) -> PathBuf {
     let mut cfg = cmake::Config::new(chiaki_dir);
 
     // Always build Release: a Debug build on MSVC would link the debug CRT,
@@ -199,7 +236,6 @@ fn build_chiaki(chiaki_dir: &Path, android: Option<&Android>) -> PathBuf {
         ("CHIAKI_LIB_ENABLE_OPUS", "OFF"),
         ("CHIAKI_USE_SYSTEM_JERASURE", "OFF"),
         ("CHIAKI_USE_SYSTEM_NANOPB", "OFF"),
-        ("CHIAKI_USE_SYSTEM_CURL", "OFF"),
         // nanopb switches MSVC builds to the static CRT (/MT) by default;
         // Rust links the dynamic one (/MD), and mixing them breaks linking.
         ("nanopb_MSVC_STATIC_RUNTIME", "OFF"),
@@ -216,6 +252,10 @@ fn build_chiaki(chiaki_dir: &Path, android: Option<&Android>) -> PathBuf {
     ] {
         cfg.define(key, value);
     }
+    cfg.define(
+        "CHIAKI_USE_SYSTEM_CURL",
+        if system_curl { "ON" } else { "OFF" },
+    );
 
     if env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
         use_clang_cl(&mut cfg);
@@ -411,10 +451,10 @@ fn collect_static_libs(dir: &Path, out: &mut Vec<(String, PathBuf)>) {
     }
 }
 
-fn link_pkg_config_libs(target_os: &str) -> Vec<PathBuf> {
+fn link_pkg_config_libs(target_os: &str, libs: &[&str]) -> Vec<PathBuf> {
     let windows = target_os == "windows";
     let mut include_paths = Vec::new();
-    for lib in PKG_CONFIG_LIBS {
+    for lib in libs {
         let probe = pkg_config::Config::new()
             // vcpkg's static-md triplet only ships static libraries.
             .statik(windows)
