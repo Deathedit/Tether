@@ -246,6 +246,72 @@ impl Tether {
         })
     }
 
+    /// Puts a paired console into rest mode. chiaki can only do that from a
+    /// session, so this starts a small one, sends "go to bed" and ends it.
+    /// Does nothing if the console is already resting.
+    pub fn rest_mode(&self, host_id: String) -> Result<(), TetherError> {
+        let (paired, secrets, account_id) = self.session_parts(&host_id)?;
+        let ip: IpAddr = paired
+            .address
+            .parse()
+            .map_err(|_| TetherError::msg("bad address"))?;
+        let console = rp_core::discover(
+            Duration::from_secs(2),
+            &DiscoveryOptions {
+                host: Some(ip),
+                ..Default::default()
+            },
+        )?
+        .into_iter()
+        .next()
+        .ok_or_else(|| TetherError::msg(format!("{} isn't answering.", paired.name)))?;
+        if console.state == RpState::Standby {
+            return Ok(());
+        }
+        let config = rp_core::SessionConfig {
+            host: ip.to_string(),
+            target: paired.target(),
+            regist_key: secrets.regist_key,
+            rp_key: secrets.rp_key,
+            account_id,
+            video: rp_core::VideoProfile::preset(
+                rp_core::Resolution::P360,
+                30,
+                rp_core::Codec::H264,
+            ),
+        };
+        let (session, events) = rp_core::Session::start(&config, Box::new(|_| true))?;
+        let deadline = std::time::Instant::now() + Duration::from_secs(15);
+        loop {
+            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            match events.recv_timeout(left) {
+                Ok(rp_core::SessionEvent::Connected) => {
+                    session.goto_bed()?;
+                    // The console ends the session itself; give it a moment.
+                    let _ = events.recv_timeout(Duration::from_secs(3));
+                    return Ok(());
+                }
+                Ok(rp_core::SessionEvent::LoginPinRequest { .. }) => {
+                    return Err(TetherError::msg(
+                        "The console asks for its passcode; use Rest mode from a stream.",
+                    ));
+                }
+                Ok(rp_core::SessionEvent::Quit { reason, .. }) => {
+                    return Err(TetherError::msg(reason));
+                }
+                Ok(_) => {}
+                Err(_) => return Err(TetherError::msg("The console didn't respond in time.")),
+            }
+        }
+    }
+
+    /// One network round trip to the console at `address`, in milliseconds,
+    /// or `None` if it didn't answer within half a second. For the home
+    /// screen's latency graph (before a stream gives better numbers).
+    pub fn probe_latency(&self, address: String) -> Option<f32> {
+        probe_latency(&address)
+    }
+
     /// Forgets a paired console and its keys.
     pub fn unpair(&self, host_id: String) -> Result<(), TetherError> {
         self.store.lock().unwrap().remove(&host_id)?;
@@ -261,9 +327,27 @@ impl Tether {
         options: StreamOptions,
         listener: Arc<dyn StreamListener>,
     ) -> Result<Arc<StreamHandle>, TetherError> {
+        let (paired, secrets, account_id) = self.session_parts(&host_id)?;
+        stream::start(paired, secrets, account_id, options, listener)
+    }
+}
+
+impl Tether {
+    /// A paired console with its keys and the account ID, or why not.
+    fn session_parts(
+        &self,
+        host_id: &str,
+    ) -> Result<
+        (
+            tether_core::PairedConsole,
+            tether_core::ConsoleSecrets,
+            rp_core::AccountId,
+        ),
+        TetherError,
+    > {
         let store = self.store.lock().unwrap();
         let paired = store
-            .find(&host_id)
+            .find(host_id)
             .cloned()
             .ok_or_else(|| TetherError::msg("That console isn't paired."))?;
         let secrets = store
@@ -272,8 +356,32 @@ impl Tether {
         let account_id = store
             .account_id()?
             .ok_or_else(|| TetherError::msg("Set your PSN account ID first."))?;
-        drop(store);
-        stream::start(paired, secrets, account_id, options, listener)
+        Ok((paired, secrets, account_id))
+    }
+}
+
+/// Times one discovery request/reply to the console's discovery port.
+fn probe_latency(address: &str) -> Option<f32> {
+    use std::net::{SocketAddr, UdpSocket};
+    let ip: IpAddr = address.trim().parse().ok()?;
+    let target = SocketAddr::new(ip, 9302);
+    let socket = UdpSocket::bind(if ip.is_ipv4() { "0.0.0.0:0" } else { "[::]:0" }).ok()?;
+    socket
+        .set_read_timeout(Some(Duration::from_millis(500)))
+        .ok()?;
+    let started = std::time::Instant::now();
+    socket
+        .send_to(
+            b"SRCH * HTTP/1.1\ndevice-discovery-protocol-version:00030010\n",
+            target,
+        )
+        .ok()?;
+    let mut buf = [0u8; 512];
+    loop {
+        let (_, from) = socket.recv_from(&mut buf).ok()?;
+        if from.ip() == ip {
+            return Some(started.elapsed().as_secs_f32() * 1000.0);
+        }
     }
 }
 
@@ -320,5 +428,25 @@ fn init_logging() {
                 let _ = tracing::subscriber::set_global_default(subscriber);
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn latency_probe_against_fake_console() {
+        let console = std::net::UdpSocket::bind("127.0.0.1:9302").expect("port 9302 free");
+        let responder = std::thread::spawn(move || {
+            let mut buf = [0u8; 512];
+            let (n, from) = console.recv_from(&mut buf).unwrap();
+            assert!(buf[..n].starts_with(b"SRCH"));
+            console.send_to(b"HTTP/1.1 200 Ok\n", from).unwrap();
+        });
+        let ms = probe_latency("127.0.0.1").expect("fake console answers");
+        responder.join().unwrap();
+        assert!((0.0..500.0).contains(&ms));
+        assert_eq!(probe_latency("not an ip"), None);
     }
 }
