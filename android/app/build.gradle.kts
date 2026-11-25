@@ -21,6 +21,19 @@ android {
         }
     }
 
+    signingConfigs {
+        // A fixed debug key (not a secret: it only signs debug builds), so
+        // every CI build can update the previous one on a device. Each runner
+        // would otherwise generate its own and installs would be refused.
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storeType = "PKCS12"
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
