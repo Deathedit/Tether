@@ -26,6 +26,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.composed
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.Alignment
@@ -69,6 +70,7 @@ fun ConsoleCard(
     selected: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    keyFocus: Boolean = true,
 ) {
     val shape = RoundedCornerShape(14.dp)
     Column(
@@ -77,6 +79,7 @@ fun ConsoleCard(
             .clip(shape)
             .background(Palette.surface)
             .border(BorderStroke(if (selected) 2.dp else 0.dp, if (selected) Palette.accent else Color.Transparent), shape)
+            .focusProperties { canFocus = keyFocus }
             .focusRing(shape)
             .clickable(onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 12.dp),
@@ -89,12 +92,13 @@ fun ConsoleCard(
 
 /** The dashed "Add console" card. */
 @Composable
-fun AddCard(onClick: () -> Unit, modifier: Modifier = Modifier) {
+fun AddCard(onClick: () -> Unit, modifier: Modifier = Modifier, keyFocus: Boolean = true) {
     val shape = RoundedCornerShape(14.dp)
     Box(
         modifier
             .height(76.dp)
             .clip(shape)
+            .focusProperties { canFocus = keyFocus }
             .focusRing(shape)
             .clickable(onClick = onClick)
             .dashedBorder(Palette.outline, 14f),
@@ -117,9 +121,13 @@ private fun Modifier.dashedBorder(color: Color, radiusDp: Float): Modifier = dra
 
 /** "(A) Connect" style hint for the controller's face buttons. */
 @Composable
-fun ButtonHint(letter: String, label: String, onClick: () -> Unit) {
+fun ButtonHint(letter: String, label: String, onClick: () -> Unit, keyFocus: Boolean = true) {
     Row(
-        Modifier.clip(RoundedCornerShape(20.dp)).focusRing(RoundedCornerShape(20.dp)).clickable(onClick = onClick).padding(end = 8.dp),
+        Modifier.clip(RoundedCornerShape(20.dp))
+            .focusProperties { canFocus = keyFocus }
+            .focusRing(RoundedCornerShape(20.dp))
+            .clickable(onClick = onClick)
+            .padding(end = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(

@@ -102,22 +102,24 @@ fun HomeScreen(
             val visible = model.paired.take(3)
             visible.forEachIndexed { i, c ->
                 val (l, col) = stateLabel(model.stateOf(c))
+                // The controller drives this screen directly (left/right,
+                // A/Y/X), so these are touch-only: no d-pad focus.
                 ConsoleCard(c.name, l, col, selected = i == model.selected, onClick = {
                     if (i == model.selected) onConnect() else model.select(i)
-                }, modifier = Modifier.weight(1f))
+                }, modifier = Modifier.weight(1f), keyFocus = false)
             }
-            AddCard(onAdd, Modifier.weight(1f))
+            AddCard(onAdd, Modifier.weight(1f), keyFocus = false)
             repeat(3 - visible.size) { Spacer(Modifier.weight(1f)) }
         }
         Spacer(Modifier.height(18.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
             if (console != null) {
-                ButtonHint("A", "Connect", onConnect)
-                ButtonHint("Y", "Rest mode", onRest)
+                ButtonHint("A", "Connect", onConnect, keyFocus = false)
+                ButtonHint("Y", "Rest mode", onRest, keyFocus = false)
             } else {
-                ButtonHint("A", "Add console", onAdd)
+                ButtonHint("A", "Add console", onAdd, keyFocus = false)
             }
-            ButtonHint("X", "Settings", onSettings)
+            ButtonHint("X", "Settings", onSettings, keyFocus = false)
         }
     }
 }
