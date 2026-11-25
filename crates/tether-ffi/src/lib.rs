@@ -124,11 +124,44 @@ impl Tether {
     }
 
     /// Consoles on the local network, with whether each is paired.
+    ///
+    /// Broadcast only reaches the local subnet, so each paired console is
+    /// also asked directly at its stored address (that works when the
+    /// console sits on another subnet, routed through the router).
     pub fn discover(&self, timeout_ms: u32) -> Result<Vec<ConsoleInfo>, TetherError> {
-        let found = rp_core::discover(
-            Duration::from_millis(timeout_ms.into()),
-            &DiscoveryOptions::default(),
-        )?;
+        let timeout = Duration::from_millis(timeout_ms.into());
+        let paired_addrs: Vec<IpAddr> = self
+            .store
+            .lock()
+            .unwrap()
+            .paired()
+            .iter()
+            .filter_map(|p| p.address.parse().ok())
+            .collect();
+        // Ask the paired consoles directly, in parallel with the broadcast.
+        let direct: Vec<_> = paired_addrs
+            .into_iter()
+            .map(|ip| {
+                std::thread::spawn(move || {
+                    let options = DiscoveryOptions {
+                        host: Some(ip),
+                        ..Default::default()
+                    };
+                    rp_core::discover(timeout, &options).unwrap_or_default()
+                })
+            })
+            .collect();
+        let mut found = rp_core::discover(timeout, &DiscoveryOptions::default())?;
+        for handle in direct {
+            for c in handle.join().unwrap_or_default() {
+                if !found
+                    .iter()
+                    .any(|f| f.host_id.eq_ignore_ascii_case(&c.host_id))
+                {
+                    found.push(c);
+                }
+            }
+        }
         let store = self.store.lock().unwrap();
         Ok(found
             .into_iter()
