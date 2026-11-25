@@ -1,3 +1,7 @@
 /target
 /vcpkg_installed
 *.pdb
+
+# Local secrets: the Android release key and its passwords
+.env
+*.jks
