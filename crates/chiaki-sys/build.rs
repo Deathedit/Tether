@@ -6,6 +6,10 @@
 //! - Windows: a vcpkg install tree (triplet `x64-windows-static-md`). By default
 //!   `<workspace>/vcpkg_installed/x64-windows-static-md`, or set
 //!   `TETHER_VCPKG_INSTALLED` to another triplet directory.
+//! - Android: chiaki-ng's own CMake downloads and builds OpenSSL, json-c and
+//!   miniupnpc for the target (as its Gradle build does); libevent isn't used.
+//!   Needs the NDK (`ANDROID_NDK_HOME`, as set by cargo-ndk) and a Unix-like
+//!   build host, since OpenSSL builds with its own Configure script and make.
 //!
 //! Build tools needed on every platform: CMake, a C compiler, Python 3 with the
 //! `protobuf` package, `protoc` (for nanopb) and libclang (for bindgen).
@@ -22,6 +26,13 @@ const CMAKE_LIBS: &[&str] = &[
     "jerasure",
     "gf_complete",
 ];
+
+/// On Android, the dependencies chiaki-ng's CMake built itself, in link order.
+const ANDROID_DEP_LIBS: &[&str] = &["json-c", "miniupnpc", "ssl", "crypto"];
+
+/// Lowest Android API level Tether supports (Android 11), unless cargo-ndk
+/// passes another.
+const ANDROID_MIN_API: &str = "30";
 
 /// Libraries that chiaki-ng's lib links against, looked up with pkg-config.
 /// `libssl` is needed on Linux, where the bundled curl uses OpenSSL for TLS
@@ -59,6 +70,9 @@ fn main() {
         "PROTOC",
         "PYTHON",
         "PKG_CONFIG_PATH",
+        "ANDROID_NDK_HOME",
+        "ANDROID_NDK_ROOT",
+        "CARGO_NDK_ANDROID_PLATFORM",
     ] {
         println!("cargo:rerun-if-env-changed={var}");
     }
@@ -66,12 +80,63 @@ fn main() {
     if target_os == "windows" && target_env == "msvc" {
         setup_vcpkg(&workspace_dir);
     }
+    let android = (target_os == "android").then(Android::from_env);
 
-    let build_dir = build_chiaki(&chiaki_dir);
-    link_cmake_libs(&build_dir, &target_os);
-    let include_paths = link_pkg_config_libs(&target_os);
+    let build_dir = build_chiaki(&chiaki_dir, android.as_ref());
+    link_cmake_libs(&build_dir, &target_os, CMAKE_LIBS);
+    let include_paths = if android.is_some() {
+        link_cmake_libs(&build_dir, &target_os, ANDROID_DEP_LIBS);
+        Vec::new()
+    } else {
+        link_pkg_config_libs(&target_os)
+    };
     link_system_libs(&target_os);
-    generate_bindings(&chiaki_dir, &build_dir, &include_paths);
+    generate_bindings(&chiaki_dir, &build_dir, &include_paths, android.as_ref());
+}
+
+/// Android NDK settings for an Android target.
+struct Android {
+    ndk: PathBuf,
+    /// NDK ABI name: arm64-v8a, x86_64, ...
+    abi: &'static str,
+    api: String,
+}
+
+impl Android {
+    fn from_env() -> Self {
+        let ndk = ["ANDROID_NDK_HOME", "ANDROID_NDK_ROOT", "ANDROID_NDK"]
+            .iter()
+            .find_map(env::var_os)
+            .map(PathBuf::from)
+            .expect("Android NDK not found: set ANDROID_NDK_HOME (cargo-ndk does this)");
+        let abi = match env::var("CARGO_CFG_TARGET_ARCH").unwrap().as_str() {
+            "aarch64" => "arm64-v8a",
+            "x86_64" => "x86_64",
+            "arm" => "armeabi-v7a",
+            "x86" => "x86",
+            other => panic!("unsupported Android architecture {other}"),
+        };
+        let api = env::var("CARGO_NDK_ANDROID_PLATFORM")
+            .ok()
+            .filter(|p| p.parse::<u32>().is_ok_and(|n| n >= 30))
+            .unwrap_or_else(|| ANDROID_MIN_API.to_owned());
+        Self { ndk, abi, api }
+    }
+
+    /// The NDK's sysroot for the build host (headers for bindgen).
+    fn sysroot(&self) -> PathBuf {
+        let host = if cfg!(target_os = "windows") {
+            "windows-x86_64"
+        } else if cfg!(target_os = "macos") {
+            "darwin-x86_64"
+        } else {
+            "linux-x86_64"
+        };
+        self.ndk
+            .join("toolchains/llvm/prebuilt")
+            .join(host)
+            .join("sysroot")
+    }
 }
 
 /// Points pkg-config and CMake at the vcpkg install tree.
@@ -104,7 +169,7 @@ fn setup_vcpkg(workspace_dir: &Path) {
     }
 }
 
-fn build_chiaki(chiaki_dir: &Path) -> PathBuf {
+fn build_chiaki(chiaki_dir: &Path, android: Option<&Android>) -> PathBuf {
     let mut cfg = cmake::Config::new(chiaki_dir);
 
     // Always build Release: a Debug build on MSVC would link the debug CRT,
@@ -122,7 +187,6 @@ fn build_chiaki(chiaki_dir: &Path) -> PathBuf {
         ("CHIAKI_ENABLE_TESTS", "OFF"),
         ("CHIAKI_ENABLE_CLI", "OFF"),
         ("CHIAKI_ENABLE_GUI", "OFF"),
-        ("CHIAKI_ENABLE_ANDROID", "OFF"),
         ("CHIAKI_ENABLE_BOREALIS", "OFF"),
         ("CHIAKI_ENABLE_SETSU", "OFF"),
         ("CHIAKI_ENABLE_STEAMDECK_NATIVE", "OFF"),
@@ -157,6 +221,13 @@ fn build_chiaki(chiaki_dir: &Path) -> PathBuf {
         use_clang_cl(&mut cfg);
     }
 
+    match android {
+        Some(android) => setup_android(&mut cfg, android),
+        None => {
+            cfg.define("CHIAKI_ENABLE_ANDROID", "OFF");
+        }
+    }
+
     if let Some(installed) = env::var_os("TETHER_VCPKG_INSTALLED") {
         let installed = PathBuf::from(installed);
         cfg.define("CMAKE_PREFIX_PATH", &installed);
@@ -172,6 +243,40 @@ fn build_chiaki(chiaki_dir: &Path) -> PathBuf {
     }
 
     cfg.build().join("build")
+}
+
+/// Cross-compiles with the NDK's CMake toolchain, the way chiaki-ng's own
+/// Gradle build configures it.
+fn setup_android(cfg: &mut cmake::Config, android: &Android) {
+    cfg.define(
+        "CMAKE_TOOLCHAIN_FILE",
+        android.ndk.join("build/cmake/android.toolchain.cmake"),
+    );
+    cfg.define("ANDROID_ABI", android.abi);
+    cfg.define("ANDROID_PLATFORM", format!("android-{}", android.api));
+    for (key, value) in [
+        // Android code paths (no libevent; Android networking in holepunch).
+        ("CHIAKI_ENABLE_ANDROID", "ON"),
+        // Download and build these for the target instead of using system ones.
+        ("CHIAKI_LIB_OPENSSL_EXTERNAL_PROJECT", "ON"),
+        ("CHIAKI_LIB_JSONC_EXTERNAL_PROJECT", "ON"),
+        ("CHIAKI_LIB_MINIUPNPC_EXTERNAL_PROJECT", "ON"),
+    ] {
+        cfg.define(key, value);
+    }
+
+    // CHIAKI_ENABLE_ANDROID also configures chiaki-ng's own JNI library,
+    // which needs Google's `oboe` package from Gradle. We never build that
+    // target (only chiaki-lib), so a stub package satisfies its find_package.
+    let stub = PathBuf::from(env::var("OUT_DIR").unwrap()).join("oboe-stub");
+    std::fs::create_dir_all(&stub).unwrap();
+    std::fs::write(
+        stub.join("oboeConfig.cmake"),
+        "# Stub so chiaki-ng's android/app CMake configures; never linked.\n\
+         if(NOT TARGET oboe::oboe)\n  add_library(oboe::oboe INTERFACE IMPORTED)\nendif()\n",
+    )
+    .unwrap();
+    cfg.define("oboe_DIR", &stub);
 }
 
 /// chiaki-ng uses C99 variable-length arrays, which MSVC's `cl.exe` rejects
@@ -253,11 +358,11 @@ fn find_program<const N: usize>(
 }
 
 /// Finds the static libraries chiaki-ng's build produced and links them.
-fn link_cmake_libs(build_dir: &Path, target_os: &str) {
+fn link_cmake_libs(build_dir: &Path, target_os: &str, libs: &[&str]) {
     let mut found = Vec::new();
     collect_static_libs(build_dir, &mut found);
 
-    for wanted in CMAKE_LIBS {
+    for wanted in libs {
         let hit = found.iter().find(|(stem, _)| {
             let stem = if target_os == "windows" {
                 stem.as_str()
@@ -358,7 +463,12 @@ fn link_system_libs(target_os: &str) {
     }
 }
 
-fn generate_bindings(chiaki_dir: &Path, build_dir: &Path, include_paths: &[PathBuf]) {
+fn generate_bindings(
+    chiaki_dir: &Path,
+    build_dir: &Path,
+    include_paths: &[PathBuf],
+    android: Option<&Android>,
+) {
     let mut builder = bindgen::Builder::default()
         .header("wrapper.h")
         .clang_arg(format!(
@@ -381,6 +491,12 @@ fn generate_bindings(chiaki_dir: &Path, build_dir: &Path, include_paths: &[PathB
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()));
     for path in include_paths {
         builder = builder.clang_arg(format!("-I{}", path.display()));
+    }
+    if let Some(android) = android {
+        let target = env::var("TARGET").unwrap();
+        builder = builder
+            .clang_arg(format!("--target={target}{}", android.api))
+            .clang_arg(format!("--sysroot={}", android.sysroot().display()));
     }
 
     let out = PathBuf::from(env::var("OUT_DIR").unwrap()).join("bindings.rs");

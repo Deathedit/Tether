@@ -7,10 +7,10 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-cpal.workspace = true
+cpal = { workspace = true, optional = true }
 directories.workspace = true
 hex.workspace = true
-opus.workspace = true
+opus = { workspace = true, optional = true }
 rp-core.workspace = true
 serde.workspace = true
 thiserror.workspace = true
@@ -21,6 +21,12 @@ tracing.workspace = true
 # secrets in the Keystore on the Kotlin side instead.
 [target.'cfg(any(windows, target_os = "linux", target_os = "macos"))'.dependencies]
 keyring.workspace = true
+
+[features]
+default = ["audio"]
+# Session audio and microphone (cpal + libopus). Off for the Android build
+# until milestone 7.
+audio = ["dep:cpal", "dep:opus"]
 
 [dev-dependencies]
 tempfile.workspace = true

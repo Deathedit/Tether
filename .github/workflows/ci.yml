@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, "milestone-*"]
   pull_request:
 
 env:
@@ -28,6 +28,57 @@ jobs:
       - run: nix develop --command cargo clippy --workspace --all-targets -- -D warnings
       - run: nix develop --command cargo test --workspace
       - run: nix develop --command cargo build --release -p tether-desktop
+
+  android:
+    name: Android APK
+    runs-on: ubuntu-24.04
+    env:
+      NDK_VERSION: 28.2.13676358
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          # nanopb's generator (protoc + Python protobuf) and libclang for
+          # bindgen. CMake, perl and make (for OpenSSL) are on the runner.
+          sudo apt-get install -y --no-install-recommends \
+            protobuf-compiler python3-protobuf libclang-dev
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK platform and NDK
+        run: |
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;$NDK_VERSION"
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android, x86_64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: android
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
+
+      - name: Build the Rust core and Kotlin bindings
+        run: sh android/build-rust.sh
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.14.3"
+      - name: Build the APK
+        run: gradle --project-dir android assembleDebug
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tether-android-debug
+          path: android/app/build/outputs/apk/debug/app-debug.apk
 
   windows:
     name: Windows build + tests
