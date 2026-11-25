@@ -40,11 +40,15 @@ class Rumble(private val context: Context) {
 
     fun stop() = set(0, 0)
 
-    private fun gamepadVibrators(): VibratorManager? =
-        InputDevice.getDeviceIds()
-            .mapNotNull { InputDevice.getDevice(it) }
-            .firstOrNull { it.sources and InputDevice.SOURCE_GAMEPAD == InputDevice.SOURCE_GAMEPAD }
-            ?.vibratorManager
+    private fun gamepadVibrators(): VibratorManager? {
+        for (id in InputDevice.getDeviceIds()) {
+            val device: InputDevice = InputDevice.getDevice(id) ?: continue
+            if ((device.sources and InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD) {
+                return device.getVibratorManager()
+            }
+        }
+        return null
+    }
 
     private fun deviceVibrator(): Vibrator? =
         (context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager)?.defaultVibrator
