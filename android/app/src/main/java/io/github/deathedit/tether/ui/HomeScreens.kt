@@ -301,6 +301,7 @@ fun SettingsScreen(
     var fps by remember { mutableStateOf(settings.fps) }
     var codec by remember { mutableStateOf(settings.codec) }
     var audio by remember { mutableStateOf(settings.audio) }
+    var overlay by remember { mutableStateOf(settings.showOverlay) }
     Page("Settings", onBack) {
         SectionLabel("Stream")
         Spacer(Modifier.height(10.dp))
@@ -316,6 +317,18 @@ fun SettingsScreen(
             Switch(
                 checked = audio,
                 onCheckedChange = { audio = it; settings.audio = it },
+                colors = SwitchDefaults.colors(checkedTrackColor = Palette.accent, checkedThumbColor = Palette.onAccent),
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Latency on the game screen", style = Type.body)
+                Text("Off: the top screen shows only the game.", style = Type.label)
+            }
+            Switch(
+                checked = overlay,
+                onCheckedChange = { overlay = it; settings.showOverlay = it },
                 colors = SwitchDefaults.colors(checkedTrackColor = Palette.accent, checkedThumbColor = Palette.onAccent),
             )
         }

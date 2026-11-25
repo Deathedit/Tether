@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -70,6 +71,7 @@ class StreamActivity : ComponentActivity(), SurfaceHolder.Callback, StreamListen
     }
 
     private val settings by lazy { Settings(this) }
+    private val showOverlay by lazy { settings.showOverlay }
     private val secondScreen by lazy { SecondScreen(this) }
     private val bits = buttonBits()
     private var stream: StreamHandle? = null
@@ -124,9 +126,17 @@ class StreamActivity : ComponentActivity(), SurfaceHolder.Callback, StreamListen
             status?.let {
                 Text(it, style = Type.title, modifier = Modifier.align(Alignment.Center))
             }
-            // Latency pill. On a phone it also opens the companion overlay.
+            // Latency pill (can be turned off in Settings). On a phone it
+            // also opens the companion overlay; with the pill off, the empty
+            // top-right corner still does.
             val ms = stats?.latencyMs ?: 0u
-            if (status == null && (ms > 0u || !secondScreen.available)) {
+            if (status == null && !showOverlay && !secondScreen.available) {
+                Box(
+                    Modifier.align(Alignment.TopEnd).size(72.dp)
+                        .clickable { overlayOpen = !overlayOpen },
+                )
+            }
+            if (status == null && showOverlay && (ms > 0u || !secondScreen.available)) {
                 Row(
                     Modifier.align(Alignment.TopEnd).padding(16.dp)
                         .clip(RoundedCornerShape(20.dp))

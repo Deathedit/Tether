@@ -27,6 +27,11 @@ class Settings(context: Context) {
         get() = prefs.getBoolean("audio", true)
         set(v) = prefs.edit().putBoolean("audio", v).apply()
 
+    /** Show the latency pill over the game on the top screen. */
+    var showOverlay: Boolean
+        get() = prefs.getBoolean("show_overlay", true)
+        set(v) = prefs.edit().putBoolean("show_overlay", v).apply()
+
     /** The console picked on the home screen last time. */
     var lastConsole: String?
         get() = prefs.getString("last_console", null)
