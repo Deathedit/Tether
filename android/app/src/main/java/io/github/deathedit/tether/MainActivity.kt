@@ -1,184 +1,206 @@
 package io.github.deathedit.tether
 
-import android.app.Activity
 import android.content.Intent
-import android.graphics.Color
-import android.net.Uri
+import android.media.MediaCodecList
 import android.os.Bundle
-import android.text.InputType
-import android.view.View
-import android.widget.Button
-import android.widget.EditText
-import android.widget.LinearLayout
-import android.widget.ScrollView
-import android.widget.TextView
-import android.widget.Toast
-import io.github.deathedit.tether.core.ConsoleInfo
-import io.github.deathedit.tether.core.ConsoleState
-import java.util.concurrent.Executors
+import android.view.KeyEvent
+import android.view.MotionEvent
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.setContent
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.lifecycle.lifecycleScope
+import io.github.deathedit.tether.ui.HomeCompanion
+import io.github.deathedit.tether.ui.HomeScreen
+import io.github.deathedit.tether.ui.PairScreen
+import io.github.deathedit.tether.ui.PhoneSignInScreen
+import io.github.deathedit.tether.ui.SettingsScreen
+import io.github.deathedit.tether.ui.TetherTheme
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /**
- * Bare test screen for milestone 6: account ID, pairing and the console
- * list. The designed Compose screens arrive in milestone 7.
+ * Home: pick a console, pair new ones, settings. On the AYN Thor the bottom
+ * screen shows the network to the selected console and big buttons.
  */
-class MainActivity : Activity() {
-    private val worker = Executors.newSingleThreadExecutor()
+class MainActivity : ComponentActivity() {
+    private enum class Screen { Home, Pair, PhoneSignIn, Settings }
 
-    private lateinit var accountStatus: TextView
-    private lateinit var accountInput: EditText
-    private lateinit var redirectInput: EditText
-    private lateinit var addressInput: EditText
-    private lateinit var pinInput: EditText
-    private lateinit var consoles: LinearLayout
+    private val settings by lazy { Settings(this) }
+    private val model by lazy { HomeModel(core, settings) }
+    private val secondScreen by lazy { SecondScreen(this) }
+    private var screen by mutableStateOf(Screen.Home)
+    private var accountId by mutableStateOf<String?>(null)
+    private var loops: List<Job> = emptyList()
+    private var phone: PhoneSignIn? = null
+    private var phoneState by mutableStateOf<PhoneSignIn.State?>(null)
+    private var hatX = 0f
+    private val decoderName by lazy { lowLatencyDecoder() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
-        val column = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(48, 48, 48, 48)
+        setContent {
+            TetherTheme {
+                BackHandler(enabled = screen != Screen.Home) {
+                    if (screen == Screen.PhoneSignIn) closePhoneSignIn() else screen = Screen.Home
+                }
+                when (screen) {
+                    Screen.Home -> HomeScreen(
+                        model, settings,
+                        onConnect = ::connect,
+                        onRest = { model.restMode(lifecycleScope) },
+                        onSettings = { screen = Screen.Settings },
+                        onAdd = { openPair() },
+                    )
+                    Screen.Pair -> PairScreen(
+                        model, accountId, model.unpaired,
+                        onSaveAccount = { id ->
+                            model.run(lifecycleScope, "Saving…", { core.setAccountId(id) }) { refresh() }
+                        },
+                        onPhoneSignIn = ::openPhoneSignIn,
+                        onPair = { address, code ->
+                            var name = ""
+                            model.run(lifecycleScope, "Pairing…", { name = core.pair(address, code).name }) {
+                                refresh()
+                                model.select(model.paired.indexOfFirst { it.name == name })
+                                screen = Screen.Home
+                            }
+                        },
+                        onBack = { screen = Screen.Home },
+                    )
+                    Screen.PhoneSignIn -> PhoneSignInScreen(phoneState, onBack = ::closePhoneSignIn)
+                    Screen.Settings -> SettingsScreen(
+                        settings, accountId, model.selectedConsole,
+                        onUnpair = { c ->
+                            model.run(lifecycleScope, "Forgetting…", { core.unpair(c.hostId) }) {
+                                refresh()
+                                screen = Screen.Home
+                            }
+                        },
+                        onBack = { screen = Screen.Home },
+                    )
+                }
+            }
         }
-        fun heading(text: String) = column.addView(TextView(this).apply {
-            this.text = text
-            textSize = 20f
-            setTextColor(Color.WHITE)
-            setPadding(0, 32, 0, 8)
-        })
-        fun field(hint: String, type: Int = InputType.TYPE_CLASS_TEXT) = EditText(this).apply {
-            this.hint = hint
-            inputType = type
-            column.addView(this)
-        }
-        fun button(text: String, onClick: () -> Unit) = column.addView(Button(this).apply {
-            this.text = text
-            setOnClickListener { onClick() }
-        })
-
-        column.addView(TextView(this).apply {
-            text = "Tether"
-            textSize = 28f
-            setTextColor(Color.WHITE)
-        })
-
-        heading("PSN account")
-        accountStatus = TextView(this).also { column.addView(it) }
-        accountInput = field("Account ID (base64), e.g. from the desktop app")
-        button("Save account ID") { saveAccountId() }
-        button("Sign in with browser") {
-            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(core.loginUrl())))
-        }
-        redirectInput = field(
-            "Paste the address the browser ended on",
-            InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI,
-        )
-        button("Finish sign-in") { finishSignIn() }
-
-        heading("Pair a console")
-        column.addView(TextView(this).apply {
-            text = "On the console: Settings > System > Remote Play > Link Device."
-        })
-        addressInput = field("Console IP address", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI)
-        pinInput = field("8-digit code", InputType.TYPE_CLASS_NUMBER)
-        button("Pair") { pair() }
-
-        heading("Consoles")
-        button("Scan network") { scan() }
-        consoles = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        column.addView(consoles)
-
-        setContentView(ScrollView(this).apply {
-            setBackgroundColor(Color.rgb(16, 18, 24))
-            addView(column)
-        })
-        refresh()
     }
 
     override fun onResume() {
         super.onResume()
         refresh()
-    }
-
-    /** Runs [work] off the UI thread, then [done] on it; errors become toasts. */
-    private fun <T> background(work: () -> T, done: (T) -> Unit) {
-        worker.execute {
-            val result = runCatching(work)
-            runOnUiThread {
-                result.fold(done) { e -> toast(e.message ?: e.toString()) }
-            }
+        loops = listOf(model.scan(lifecycleScope), model.probe(lifecycleScope))
+        secondScreen.show {
+            HomeCompanion(
+                model, decoderName,
+                onConnect = ::connect,
+                onRest = { model.restMode(lifecycleScope) },
+                onSettings = { screen = Screen.Settings },
+                onAdd = { openPair() },
+            )
         }
     }
 
-    private fun toast(text: String) = Toast.makeText(this, text, Toast.LENGTH_LONG).show()
+    override fun onPause() {
+        if (screen == Screen.PhoneSignIn) closePhoneSignIn()
+        loops.forEach { it.cancel() }
+        secondScreen.dismiss()
+        super.onPause()
+    }
 
     private fun refresh() {
-        val id = core.accountId()
-        accountStatus.text = if (id != null) "Account ID: $id" else "No account ID yet."
-        showConsoles(core.paired())
+        accountId = core.accountId()
+        model.reload()
     }
 
-    private fun saveAccountId() {
-        val text = accountInput.text.toString()
-        background({ core.setAccountId(text) }) { accountInput.text.clear(); refresh() }
-    }
-
-    private fun finishSignIn() {
-        val text = redirectInput.text.toString()
-        background({ core.finishLogin(text) }) { redirectInput.text.clear(); refresh() }
-    }
-
-    private fun pair() {
-        val address = addressInput.text.toString()
-        val pin = pinInput.text.toString()
-        toast("Pairing…")
-        background({ core.pair(address, pin) }) { console ->
-            pinInput.text.clear()
-            toast("Paired with ${console.name}")
-            refresh()
-        }
-    }
-
-    private fun scan() {
-        background({ core.discover(2000u) }) { found ->
-            if (found.isEmpty()) toast("No consoles found")
-            // Paired ones from the store, updated with what answered.
-            val paired = core.paired().associateBy { it.hostId }
-            val merged = paired.values.map { p -> found.find { it.hostId == p.hostId } ?: p } +
-                found.filter { it.hostId !in paired }
-            showConsoles(merged)
-        }
-    }
-
-    private fun showConsoles(list: List<ConsoleInfo>) {
-        consoles.removeAllViews()
-        if (list.isEmpty()) {
-            consoles.addView(TextView(this).apply { text = "None yet." })
-            return
-        }
-        for (c in list) {
-            val state = when (c.state) {
-                ConsoleState.READY -> "ready"
-                ConsoleState.STANDBY -> "rest mode"
-                ConsoleState.UNKNOWN -> "?"
-            }
-            consoles.addView(Button(this).apply {
-                text = if (c.paired) "Stream ${c.name} (${c.address}, $state)"
-                       else "${c.name} (${c.address}, $state): tap to pair"
-                setOnClickListener(View.OnClickListener {
-                    if (c.paired) {
-                        startActivity(Intent(this@MainActivity, StreamActivity::class.java)
-                            .putExtra(StreamActivity.EXTRA_HOST_ID, c.hostId)
-                            .putExtra(StreamActivity.EXTRA_NAME, c.name))
-                    } else {
-                        addressInput.setText(c.address)
-                        pinInput.requestFocus()
+    /** Serves the sign-in page for the phone and shows its QR code. */
+    private fun openPhoneSignIn() {
+        phone?.stop()
+        phoneState = null
+        screen = Screen.PhoneSignIn
+        phone = PhoneSignIn(this, core) { state ->
+            runOnUiThread {
+                phoneState = state
+                if (state is PhoneSignIn.State.Done) {
+                    refresh()
+                    lifecycleScope.launch {
+                        delay(1500)
+                        if (screen == Screen.PhoneSignIn) closePhoneSignIn()
                     }
-                })
-            })
-        }
+                }
+            }
+        }.also { it.start() }
     }
 
-    override fun onDestroy() {
-        worker.shutdown()
-        super.onDestroy()
+    private fun closePhoneSignIn() {
+        phone?.stop()
+        phone = null
+        screen = Screen.Pair
     }
+
+    private fun openPair() {
+        model.message = null
+        screen = Screen.Pair
+    }
+
+    private fun connect() {
+        val c = model.selectedConsole ?: return openPair()
+        if (model.busy != null) return
+        startActivity(
+            Intent(this, StreamActivity::class.java)
+                .putExtra(StreamActivity.EXTRA_HOST_ID, c.hostId)
+                .putExtra(StreamActivity.EXTRA_NAME, c.name),
+        )
+    }
+
+    // Controller on the home screen: left/right pick, A connect, Y rest,
+    // X settings, B back.
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        // Off the home screen, A presses whatever has focus. Compose only
+        // clicks on Enter / d-pad centre (on release), so translate both
+        // press and release.
+        if (screen != Screen.Home && event.keyCode == KeyEvent.KEYCODE_BUTTON_A) {
+            return super.dispatchKeyEvent(
+                KeyEvent(event.downTime, event.eventTime, event.action, KeyEvent.KEYCODE_DPAD_CENTER, event.repeatCount, event.metaState),
+            )
+        }
+        if (event.action != KeyEvent.ACTION_DOWN) return super.dispatchKeyEvent(event)
+        if (screen != Screen.Home) {
+            if (event.keyCode == KeyEvent.KEYCODE_BUTTON_B) {
+                if (screen == Screen.PhoneSignIn) closePhoneSignIn() else screen = Screen.Home
+                return true
+            }
+            return super.dispatchKeyEvent(event)
+        }
+        when (event.keyCode) {
+            KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_BUTTON_L1 -> model.move(-1)
+            KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_BUTTON_R1 -> model.move(1)
+            KeyEvent.KEYCODE_BUTTON_A, KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> connect()
+            KeyEvent.KEYCODE_BUTTON_Y -> model.restMode(lifecycleScope)
+            KeyEvent.KEYCODE_BUTTON_X -> screen = Screen.Settings
+            else -> return super.dispatchKeyEvent(event)
+        }
+        return true
+    }
+
+    override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
+        if (screen == Screen.Home && event.action == MotionEvent.ACTION_MOVE) {
+            val x = event.getAxisValue(MotionEvent.AXIS_HAT_X)
+            if (x != hatX) {
+                if (x < -0.5f) model.move(-1)
+                if (x > 0.5f) model.move(1)
+                hatX = x
+                return true
+            }
+        }
+        return super.dispatchGenericMotionEvent(event)
+    }
+
+    /** The hardware H.264 decoder MediaCodec would pick, for the companion. */
+    private fun lowLatencyDecoder(): String = runCatching {
+        MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos
+            .firstOrNull { !it.isEncoder && it.isHardwareAccelerated && it.supportedTypes.any { t -> t == "video/avc" } }
+            ?.name?.substringAfterLast("c2.")?.substringBefore(".avc")?.uppercase()
+    }.getOrNull() ?: "MediaCodec"
 }

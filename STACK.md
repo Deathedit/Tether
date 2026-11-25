@@ -102,13 +102,16 @@ branding. "Works with PS5" as plain text is fine.
 
 | Part | Pick |
 |---|---|
-| Language / UI | Kotlin, Jetpack Compose, min SDK 30 (Android 11) |
+| Language / UI | Kotlin, Jetpack Compose (Material 3, dark theme from the design), min SDK 30 (Android 11) |
 | Rust build | `cargo-ndk` → `aarch64-linux-android` (+ `x86_64-linux-android` for the emulator), loaded as a `.so` |
 | Video decode | **MediaCodec from Rust** through the `ndk` crate (`AMediaCodec`). Kotlin passes the `SurfaceView`'s `Surface` down once; Rust turns it into an `ANativeWindow`, and the decoder draws straight onto it. No per-frame JNI calls. Set `KEY_LOW_LATENCY` and the vendor low-latency keys when the decoder supports them. |
 | Controllers | Android `KeyEvent` / `MotionEvent` from the gamepad, forwarded to the core. The Thor's built-in controls are a standard Android gamepad. Rumble uses `InputDevice.vibratorManager` (Android 12+). |
 | Touchpad | The touchpad area on the bottom screen sends touch coordinates to the core as DualSense touchpad input |
 | Bottom screen | Find it with `DisplayManager.getDisplays()`: the non-default display. **Don't hardcode its ID.** One developer reports it as display 4 on the Thor. Show the companion UI there with Android's `Presentation` class. It lives inside the main Activity, so it shares the session state for free. On phones with one screen, the companion becomes an overlay. |
-| Packaging | APK / AAB via Gradle, sideloaded first |
+| Packaging | APK / AAB via Gradle, sideloaded first. Debug builds are signed with a committed debug-only key (`android/app/debug.keystore`) so each CI build updates the last one on a device |
+| Secrets | Pairing keys go through a UniFFI `SecureStorage` interface implemented in Kotlin: AES-GCM with a key in the Android Keystore, ciphertext in private SharedPreferences |
+| Audio | The core's cpal + Opus path (AAudio). cpal reaches `AudioManager` through `ndk-context`, which the app initialises at start (`NativeSurface.init`) |
+| PSN sign-in | Sony's sign-in always ends on its own Remote Play page with the code in the address. The app serves a one-time page on the local network, shown as a QR code: sign in on the phone, paste the final address there, and the phone posts it back |
 
 ---
 

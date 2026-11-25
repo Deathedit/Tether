@@ -13,8 +13,7 @@ crate-type = ["cdylib", "lib"]
 [dependencies]
 crossbeam-channel.workspace = true
 rp-core.workspace = true
-# Audio arrives in milestone 7.
-tether-core = { workspace = true, default-features = false }
+tether-core.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 uniffi.workspace = true
@@ -22,5 +21,6 @@ uniffi.workspace = true
 [target.'cfg(target_os = "android")'.dependencies]
 jni-sys.workspace = true
 ndk.workspace = true
+ndk-context.workspace = true
 tracing-android.workspace = true
 tracing-subscriber.workspace = true

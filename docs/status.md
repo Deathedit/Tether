@@ -3,12 +3,25 @@
 Milestones 1 (discover), 2 (pair), 3 (first picture), 4 (play) and 5 (desktop
 UI): sound, controllers and rumble, in the desktop app.
 
-Milestone 6 (Android core): a bare Android app (APK from CI, see
-[building](building.md#android)) that pairs, wakes and streams video,
-hardware-decoded with MediaCodec and drawn straight onto the screen. Tested on
-a PS5. No sound, controller input or designed screens yet (milestone 7), and
-pairing keys sit in a file only the app can read until they move into the
-Android Keystore.
+Milestones 6 (Android core) and 7 (Android app): the Android app (APK from
+CI, see [building](building.md#android)), tested on an AYN Thor with a PS5:
+
+- Home screen from the design: the selected console, console cards and
+  A/Y/X hints; the controller picks (left/right), connects (A), puts the
+  console to rest (Y) and opens settings (X).
+- Streams with hardware video decoding (MediaCodec drawing straight onto
+  the screen), sound, the Thor's built-in controls (or any controller) and
+  rumble.
+- On the Thor's bottom screen: at home, the network to the selected console
+  (latency graph, jitter) and big Connect / Rest mode / Settings buttons; in
+  a stream, live latency, bitrate, frame rate and loss, a DualSense touchpad
+  (tap to click) and Home, Mic, Capture and Disconnect. On phones that panel
+  opens from the latency pill.
+- Pairing: sign in to PSN from your phone by scanning a QR code (the Thor
+  serves a one-time page on your network), or paste an account ID; then the
+  console's 8-digit code. Pairing keys are encrypted with a key in the
+  Android Keystore.
+- Finds paired consoles on another subnet by asking them directly.
 
 Run `tether` with no arguments to open the app: it lists the consoles on your
 network, links new ones (sign in once, then type the 8-digit code), wakes and

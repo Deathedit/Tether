@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Tether's mark: two rings joined by a short link, as in the app header.
+     Drawn inside the adaptive icon's 66dp safe zone (of 108dp). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- left ring -->
+    <path
+        android:pathData="M38,54m-10,0a10,10 0,1 1,20 0a10,10 0,1 1,-20 0"
+        android:strokeWidth="5"
+        android:strokeColor="#A9B4FF"
+        android:fillColor="#00000000" />
+    <!-- right ring -->
+    <path
+        android:pathData="M70,54m-10,0a10,10 0,1 1,20 0a10,10 0,1 1,-20 0"
+        android:strokeWidth="5"
+        android:strokeColor="#A9B4FF"
+        android:fillColor="#00000000" />
+    <!-- link -->
+    <path
+        android:pathData="M48,54L60,54"
+        android:strokeWidth="5"
+        android:strokeColor="#A9B4FF"
+        android:strokeLineCap="round" />
+</vector>

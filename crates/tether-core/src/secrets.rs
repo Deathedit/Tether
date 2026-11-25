@@ -81,12 +81,32 @@ pub enum SecretsError {
     Corrupt(String),
 }
 
-#[derive(Debug, Clone)]
+/// A secret store provided by the app, e.g. the Android Keystore through
+/// Kotlin. Values are opaque strings; keys look like `console:<HOSTID>`.
+pub trait SecretBackend: Send + Sync {
+    fn get(&self, key: &str) -> Result<Option<String>, String>;
+    fn set(&self, key: &str, value: &str) -> Result<(), String>;
+    fn delete(&self, key: &str) -> Result<(), String>;
+}
+
+#[derive(Clone)]
 pub enum SecretStore {
     /// The OS credential store.
     Keyring,
     /// Fallback file, mode 0600 on Unix.
     File(PathBuf),
+    /// Provided by the app (Android: Keystore-encrypted storage).
+    External(std::sync::Arc<dyn SecretBackend>),
+}
+
+impl fmt::Debug for SecretStore {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Keyring => f.write_str("Keyring"),
+            Self::File(p) => f.debug_tuple("File").field(p).finish(),
+            Self::External(_) => f.write_str("External"),
+        }
+    }
 }
 
 impl SecretStore {
@@ -111,7 +131,26 @@ impl SecretStore {
         match self {
             Self::Keyring => "system credential store".to_owned(),
             Self::File(path) => path.display().to_string(),
+            Self::External(_) => "app's secure storage".to_owned(),
         }
+    }
+
+    /// Moves every console's keys from an old `secrets.toml` into this
+    /// store, then deletes the file. Returns how many were moved; 0 if the
+    /// file doesn't exist.
+    pub fn import_file(&self, path: &Path) -> Result<usize, SecretsError> {
+        let map = read_file(path)?;
+        if map.is_empty() {
+            return Ok(0);
+        }
+        for (k, value) in &map {
+            let host_id = k.strip_prefix("console:").unwrap_or(k);
+            let secrets = ConsoleSecrets::decode(value)
+                .ok_or_else(|| SecretsError::Corrupt(host_id.to_owned()))?;
+            self.set(host_id, &secrets)?;
+        }
+        std::fs::remove_file(path)?;
+        Ok(map.len())
     }
 
     pub fn set(&self, host_id: &str, secrets: &ConsoleSecrets) -> Result<(), SecretsError> {
@@ -129,6 +168,9 @@ impl SecretStore {
                 map.insert(key(host_id), secrets.encode());
                 write_file(path, &map)
             }
+            Self::External(b) => b
+                .set(&key(host_id), &secrets.encode())
+                .map_err(SecretsError::Keyring),
         }
     }
 
@@ -143,6 +185,7 @@ impl SecretStore {
             #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
             Self::Keyring => None,
             Self::File(path) => read_file(path)?.remove(&key(host_id)),
+            Self::External(b) => b.get(&key(host_id)).map_err(SecretsError::Keyring)?,
         };
         encoded
             .map(|s| {
@@ -167,6 +210,7 @@ impl SecretStore {
                 }
                 Ok(())
             }
+            Self::External(b) => b.delete(&key(host_id)).map_err(SecretsError::Keyring),
         }
     }
 }
@@ -233,6 +277,40 @@ mod tests {
         assert_eq!(s.regist_key_hex(), "1a2b3c4d");
         assert!(ConsoleSecrets::decode("v2:00").is_none());
         assert!(!format!("{s:?}").contains("1a2b"));
+    }
+
+    #[derive(Default)]
+    struct MemBackend(std::sync::Mutex<BTreeMap<String, String>>);
+
+    impl SecretBackend for MemBackend {
+        fn get(&self, key: &str) -> Result<Option<String>, String> {
+            Ok(self.0.lock().unwrap().get(key).cloned())
+        }
+        fn set(&self, key: &str, value: &str) -> Result<(), String> {
+            self.0.lock().unwrap().insert(key.into(), value.into());
+            Ok(())
+        }
+        fn delete(&self, key: &str) -> Result<(), String> {
+            self.0.lock().unwrap().remove(key);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn external_store_and_import() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("secrets.toml");
+        SecretStore::File(file.clone())
+            .set("9047485221DD", &sample())
+            .unwrap();
+
+        let store = SecretStore::External(std::sync::Arc::new(MemBackend::default()));
+        assert_eq!(store.import_file(&file).unwrap(), 1);
+        assert!(!file.exists());
+        assert_eq!(store.get("9047485221dd").unwrap(), Some(sample()));
+        assert_eq!(store.import_file(&file).unwrap(), 0);
+        store.delete("9047485221DD").unwrap();
+        assert_eq!(store.get("9047485221DD").unwrap(), None);
     }
 
     #[test]

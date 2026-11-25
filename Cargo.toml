@@ -45,6 +45,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Android (tether-ffi)
 jni-sys = "0.3"
 ndk = { version = "0.9", features = ["media", "api-level-30"] }
+ndk-context = "0.1"
 tracing-android = "0.2"
 uniffi = "0.32"
 ureq = { version = "3", features = ["json"] }

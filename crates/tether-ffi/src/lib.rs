@@ -20,7 +20,8 @@ pub mod surface;
 mod video;
 
 pub use stream::{
-    StreamEvent, StreamHandle, StreamListener, StreamOptions, VideoCodec, VideoResolution,
+    ButtonBits, ControllerInput, StreamEvent, StreamHandle, StreamListener, StreamOptions,
+    StreamStats, VideoCodec, VideoResolution, button_bits,
 };
 
 uniffi::setup_scaffolding!();
@@ -93,13 +94,29 @@ pub struct Tether {
 #[uniffi::export]
 impl Tether {
     /// Opens (or creates) Tether's data in `data_dir`, normally the app's
-    /// `filesDir`. Pairing keys go to `secrets.toml` there, which only the
-    /// app can read; moving them into the Android Keystore is milestone 7.
+    /// `filesDir`. Pairing keys go to `storage` (Keystore-encrypted on
+    /// Android); keys an older version kept in `secrets.toml` move there.
+    /// Without `storage` they stay in `secrets.toml`.
     #[uniffi::constructor]
-    pub fn new(data_dir: String) -> Result<Arc<Self>, TetherError> {
+    pub fn new(
+        data_dir: String,
+        storage: Option<Arc<dyn SecureStorage>>,
+    ) -> Result<Arc<Self>, TetherError> {
         init_logging();
         let dir = std::path::PathBuf::from(data_dir);
-        let secrets = SecretStore::File(dir.join("secrets.toml"));
+        let file = dir.join("secrets.toml");
+        let secrets = match storage {
+            Some(storage) => {
+                let store = SecretStore::External(Arc::new(StorageBackend(storage)));
+                match store.import_file(&file) {
+                    Ok(0) => {}
+                    Ok(n) => tracing::info!("moved {n} console key(s) into secure storage"),
+                    Err(e) => tracing::warn!("could not move keys into secure storage: {e}"),
+                }
+                store
+            }
+            None => SecretStore::File(file),
+        };
         let store = Store::open(dir, secrets)?;
         Ok(Arc::new(Self {
             store: Mutex::new(store),
@@ -107,11 +124,44 @@ impl Tether {
     }
 
     /// Consoles on the local network, with whether each is paired.
+    ///
+    /// Broadcast only reaches the local subnet, so each paired console is
+    /// also asked directly at its stored address (that works when the
+    /// console sits on another subnet, routed through the router).
     pub fn discover(&self, timeout_ms: u32) -> Result<Vec<ConsoleInfo>, TetherError> {
-        let found = rp_core::discover(
-            Duration::from_millis(timeout_ms.into()),
-            &DiscoveryOptions::default(),
-        )?;
+        let timeout = Duration::from_millis(timeout_ms.into());
+        let paired_addrs: Vec<IpAddr> = self
+            .store
+            .lock()
+            .unwrap()
+            .paired()
+            .iter()
+            .filter_map(|p| p.address.parse().ok())
+            .collect();
+        // Ask the paired consoles directly, in parallel with the broadcast.
+        let direct: Vec<_> = paired_addrs
+            .into_iter()
+            .map(|ip| {
+                std::thread::spawn(move || {
+                    let options = DiscoveryOptions {
+                        host: Some(ip),
+                        ..Default::default()
+                    };
+                    rp_core::discover(timeout, &options).unwrap_or_default()
+                })
+            })
+            .collect();
+        let mut found = rp_core::discover(timeout, &DiscoveryOptions::default())?;
+        for handle in direct {
+            for c in handle.join().unwrap_or_default() {
+                if !found
+                    .iter()
+                    .any(|f| f.host_id.eq_ignore_ascii_case(&c.host_id))
+                {
+                    found.push(c);
+                }
+            }
+        }
         let store = self.store.lock().unwrap();
         Ok(found
             .into_iter()
@@ -229,6 +279,72 @@ impl Tether {
         })
     }
 
+    /// Puts a paired console into rest mode. chiaki can only do that from a
+    /// session, so this starts a small one, sends "go to bed" and ends it.
+    /// Does nothing if the console is already resting.
+    pub fn rest_mode(&self, host_id: String) -> Result<(), TetherError> {
+        let (paired, secrets, account_id) = self.session_parts(&host_id)?;
+        let ip: IpAddr = paired
+            .address
+            .parse()
+            .map_err(|_| TetherError::msg("bad address"))?;
+        let console = rp_core::discover(
+            Duration::from_secs(2),
+            &DiscoveryOptions {
+                host: Some(ip),
+                ..Default::default()
+            },
+        )?
+        .into_iter()
+        .next()
+        .ok_or_else(|| TetherError::msg(format!("{} isn't answering.", paired.name)))?;
+        if console.state == RpState::Standby {
+            return Ok(());
+        }
+        let config = rp_core::SessionConfig {
+            host: ip.to_string(),
+            target: paired.target(),
+            regist_key: secrets.regist_key,
+            rp_key: secrets.rp_key,
+            account_id,
+            video: rp_core::VideoProfile::preset(
+                rp_core::Resolution::P360,
+                30,
+                rp_core::Codec::H264,
+            ),
+        };
+        let (session, events) = rp_core::Session::start(&config, Box::new(|_| true))?;
+        let deadline = std::time::Instant::now() + Duration::from_secs(15);
+        loop {
+            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            match events.recv_timeout(left) {
+                Ok(rp_core::SessionEvent::Connected) => {
+                    session.goto_bed()?;
+                    // The console ends the session itself; give it a moment.
+                    let _ = events.recv_timeout(Duration::from_secs(3));
+                    return Ok(());
+                }
+                Ok(rp_core::SessionEvent::LoginPinRequest { .. }) => {
+                    return Err(TetherError::msg(
+                        "The console asks for its passcode; use Rest mode from a stream.",
+                    ));
+                }
+                Ok(rp_core::SessionEvent::Quit { reason, .. }) => {
+                    return Err(TetherError::msg(reason));
+                }
+                Ok(_) => {}
+                Err(_) => return Err(TetherError::msg("The console didn't respond in time.")),
+            }
+        }
+    }
+
+    /// One network round trip to the console at `address`, in milliseconds,
+    /// or `None` if it didn't answer within half a second. For the home
+    /// screen's latency graph (before a stream gives better numbers).
+    pub fn probe_latency(&self, address: String) -> Option<f32> {
+        probe_latency(&address)
+    }
+
     /// Forgets a paired console and its keys.
     pub fn unpair(&self, host_id: String) -> Result<(), TetherError> {
         self.store.lock().unwrap().remove(&host_id)?;
@@ -244,9 +360,27 @@ impl Tether {
         options: StreamOptions,
         listener: Arc<dyn StreamListener>,
     ) -> Result<Arc<StreamHandle>, TetherError> {
+        let (paired, secrets, account_id) = self.session_parts(&host_id)?;
+        stream::start(paired, secrets, account_id, options, listener)
+    }
+}
+
+impl Tether {
+    /// A paired console with its keys and the account ID, or why not.
+    fn session_parts(
+        &self,
+        host_id: &str,
+    ) -> Result<
+        (
+            tether_core::PairedConsole,
+            tether_core::ConsoleSecrets,
+            rp_core::AccountId,
+        ),
+        TetherError,
+    > {
         let store = self.store.lock().unwrap();
         let paired = store
-            .find(&host_id)
+            .find(host_id)
             .cloned()
             .ok_or_else(|| TetherError::msg("That console isn't paired."))?;
         let secrets = store
@@ -255,8 +389,61 @@ impl Tether {
         let account_id = store
             .account_id()?
             .ok_or_else(|| TetherError::msg("Set your PSN account ID first."))?;
-        drop(store);
-        stream::start(paired, secrets, account_id, options, listener)
+        Ok((paired, secrets, account_id))
+    }
+}
+
+/// Times one discovery request/reply to the console's discovery port.
+fn probe_latency(address: &str) -> Option<f32> {
+    use std::net::{SocketAddr, UdpSocket};
+    let ip: IpAddr = address.trim().parse().ok()?;
+    let target = SocketAddr::new(ip, 9302);
+    let socket = UdpSocket::bind(if ip.is_ipv4() { "0.0.0.0:0" } else { "[::]:0" }).ok()?;
+    socket
+        .set_read_timeout(Some(Duration::from_millis(500)))
+        .ok()?;
+    let started = std::time::Instant::now();
+    socket
+        .send_to(
+            b"SRCH * HTTP/1.1\ndevice-discovery-protocol-version:00030010\n",
+            target,
+        )
+        .ok()?;
+    let mut buf = [0u8; 512];
+    loop {
+        let (_, from) = socket.recv_from(&mut buf).ok()?;
+        if from.ip() == ip {
+            return Some(started.elapsed().as_secs_f32() * 1000.0);
+        }
+    }
+}
+
+/// Secret storage the app provides (Android: values encrypted with a
+/// Keystore key). Keys look like `console:<HOSTID>`.
+#[uniffi::export(with_foreign)]
+pub trait SecureStorage: Send + Sync {
+    fn get(&self, key: String) -> Option<String>;
+    /// Returns false if the value could not be stored.
+    fn put(&self, key: String, value: String) -> bool;
+    fn remove(&self, key: String);
+}
+
+struct StorageBackend(Arc<dyn SecureStorage>);
+
+impl tether_core::SecretBackend for StorageBackend {
+    fn get(&self, key: &str) -> Result<Option<String>, String> {
+        Ok(self.0.get(key.to_owned()))
+    }
+    fn set(&self, key: &str, value: &str) -> Result<(), String> {
+        if self.0.put(key.to_owned(), value.to_owned()) {
+            Ok(())
+        } else {
+            Err("secure storage refused the value".into())
+        }
+    }
+    fn delete(&self, key: &str) -> Result<(), String> {
+        self.0.remove(key.to_owned());
+        Ok(())
     }
 }
 
@@ -273,6 +460,32 @@ fn init_logging() {
                     .with(layer);
                 let _ = tracing::subscriber::set_global_default(subscriber);
             }
+            // Panic messages go to stderr, which Android discards; log them.
+            let default_hook = std::panic::take_hook();
+            std::panic::set_hook(Box::new(move |info| {
+                tracing::error!("panic: {info}");
+                default_hook(info);
+            }));
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn latency_probe_against_fake_console() {
+        let console = std::net::UdpSocket::bind("127.0.0.1:9302").expect("port 9302 free");
+        let responder = std::thread::spawn(move || {
+            let mut buf = [0u8; 512];
+            let (n, from) = console.recv_from(&mut buf).unwrap();
+            assert!(buf[..n].starts_with(b"SRCH"));
+            console.send_to(b"HTTP/1.1 200 Ok\n", from).unwrap();
+        });
+        let ms = probe_latency("127.0.0.1").expect("fake console answers");
+        responder.join().unwrap();
+        assert!((0.0..500.0).contains(&ms));
+        assert_eq!(probe_latency("not an ip"), None);
     }
 }

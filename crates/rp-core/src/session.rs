@@ -418,6 +418,14 @@ impl Session {
         check(unsafe { sys::chiaki_session_set_login_pin(self.raw(), pin.as_ptr(), pin.len()) })
     }
 
+    /// Network round-trip time chiaki measured while connecting, once known.
+    pub fn rtt(&self) -> Option<std::time::Duration> {
+        // SAFETY: a plain u64 in the boxed session that chiaki writes after
+        // its RTT probe. A racy read at worst returns an older value.
+        let us = unsafe { std::ptr::read_volatile(&self.session.rtt_us) };
+        (us > 0).then(|| std::time::Duration::from_micros(us))
+    }
+
     /// Asks the console for a keyframe (e.g. after decoder errors).
     pub fn request_idr(&self) -> Result<()> {
         // SAFETY: valid session.
