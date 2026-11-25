@@ -47,14 +47,16 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             protobuf-compiler python3-protobuf libclang-dev
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
-      - uses: android-actions/setup-android@v3
+      # The runner image ships the Android SDK (ANDROID_SDK_ROOT) with its
+      # command-line tools; add the platform and NDK version we build with.
       - name: Install Android SDK platform and NDK
         run: |
-          sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;$NDK_VERSION"
+          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" \
+            "platforms;android-35" "build-tools;35.0.0" "ndk;$NDK_VERSION"
           echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
 
       - uses: dtolnay/rust-toolchain@stable
