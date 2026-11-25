@@ -2,7 +2,6 @@ package io.github.deathedit.tether
 
 import android.content.Intent
 import android.media.MediaCodecList
-import android.net.Uri
 import android.os.Bundle
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -16,16 +15,19 @@ import androidx.lifecycle.lifecycleScope
 import io.github.deathedit.tether.ui.HomeCompanion
 import io.github.deathedit.tether.ui.HomeScreen
 import io.github.deathedit.tether.ui.PairScreen
+import io.github.deathedit.tether.ui.PhoneSignInScreen
 import io.github.deathedit.tether.ui.SettingsScreen
 import io.github.deathedit.tether.ui.TetherTheme
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /**
  * Home: pick a console, pair new ones, settings. On the AYN Thor the bottom
  * screen shows the network to the selected console and big buttons.
  */
 class MainActivity : ComponentActivity() {
-    private enum class Screen { Home, Pair, Settings }
+    private enum class Screen { Home, Pair, PhoneSignIn, Settings }
 
     private val settings by lazy { Settings(this) }
     private val model by lazy { HomeModel(core, settings) }
@@ -33,6 +35,8 @@ class MainActivity : ComponentActivity() {
     private var screen by mutableStateOf(Screen.Home)
     private var accountId by mutableStateOf<String?>(null)
     private var loops: List<Job> = emptyList()
+    private var phone: PhoneSignIn? = null
+    private var phoneState by mutableStateOf<PhoneSignIn.State?>(null)
     private var hatX = 0f
     private val decoderName by lazy { lowLatencyDecoder() }
 
@@ -40,7 +44,9 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             TetherTheme {
-                BackHandler(enabled = screen != Screen.Home) { screen = Screen.Home }
+                BackHandler(enabled = screen != Screen.Home) {
+                    if (screen == Screen.PhoneSignIn) closePhoneSignIn() else screen = Screen.Home
+                }
                 when (screen) {
                     Screen.Home -> HomeScreen(
                         model, settings,
@@ -54,12 +60,7 @@ class MainActivity : ComponentActivity() {
                         onSaveAccount = { id ->
                             model.run(lifecycleScope, "Saving…", { core.setAccountId(id) }) { refresh() }
                         },
-                        onBrowserSignIn = {
-                            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(core.loginUrl())))
-                        },
-                        onFinishSignIn = { redirect ->
-                            model.run(lifecycleScope, "Signing in…", { core.finishLogin(redirect) }) { refresh() }
-                        },
+                        onPhoneSignIn = ::openPhoneSignIn,
                         onPair = { address, code ->
                             var name = ""
                             model.run(lifecycleScope, "Pairing…", { name = core.pair(address, code).name }) {
@@ -70,6 +71,7 @@ class MainActivity : ComponentActivity() {
                         },
                         onBack = { screen = Screen.Home },
                     )
+                    Screen.PhoneSignIn -> PhoneSignInScreen(phoneState, onBack = ::closePhoneSignIn)
                     Screen.Settings -> SettingsScreen(
                         settings, accountId, model.selectedConsole,
                         onUnpair = { c ->
@@ -101,6 +103,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onPause() {
+        if (screen == Screen.PhoneSignIn) closePhoneSignIn()
         loops.forEach { it.cancel() }
         secondScreen.dismiss()
         super.onPause()
@@ -109,6 +112,31 @@ class MainActivity : ComponentActivity() {
     private fun refresh() {
         accountId = core.accountId()
         model.reload()
+    }
+
+    /** Serves the sign-in page for the phone and shows its QR code. */
+    private fun openPhoneSignIn() {
+        phone?.stop()
+        phoneState = null
+        screen = Screen.PhoneSignIn
+        phone = PhoneSignIn(this, core) { state ->
+            runOnUiThread {
+                phoneState = state
+                if (state is PhoneSignIn.State.Done) {
+                    refresh()
+                    lifecycleScope.launch {
+                        delay(1500)
+                        if (screen == Screen.PhoneSignIn) closePhoneSignIn()
+                    }
+                }
+            }
+        }.also { it.start() }
+    }
+
+    private fun closePhoneSignIn() {
+        phone?.stop()
+        phone = null
+        screen = Screen.Pair
     }
 
     private fun openPair() {
@@ -132,7 +160,7 @@ class MainActivity : ComponentActivity() {
         if (event.action != KeyEvent.ACTION_DOWN) return super.dispatchKeyEvent(event)
         if (screen != Screen.Home) {
             if (event.keyCode == KeyEvent.KEYCODE_BUTTON_B) {
-                screen = Screen.Home
+                if (screen == Screen.PhoneSignIn) closePhoneSignIn() else screen = Screen.Home
                 return true
             }
             return super.dispatchKeyEvent(event)

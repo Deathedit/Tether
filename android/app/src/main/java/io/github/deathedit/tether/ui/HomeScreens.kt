@@ -214,31 +214,25 @@ fun PairScreen(
     accountId: String?,
     unpaired: List<ConsoleInfo>,
     onSaveAccount: (String) -> Unit,
-    onBrowserSignIn: () -> Unit,
-    onFinishSignIn: (String) -> Unit,
+    onPhoneSignIn: () -> Unit,
     onPair: (address: String, code: String) -> Unit,
     onBack: () -> Unit,
 ) {
     var account by remember { mutableStateOf("") }
-    var redirect by remember { mutableStateOf("") }
     var address by remember { mutableStateOf(unpaired.firstOrNull()?.address ?: "") }
     var code by remember { mutableStateOf("") }
     Page("Add console", onBack) {
         if (accountId == null) {
             SectionLabel("1 · PSN account")
             Spacer(Modifier.height(8.dp))
-            Text("Pairing needs your PSN account ID. Paste it (e.g. from the desktop app's config.toml), or sign in.", style = Type.muted)
+            Text("Pairing needs your PSN account ID. Sign in with your phone, or paste the ID (e.g. from the desktop app's config.toml).", style = Type.muted)
             Spacer(Modifier.height(10.dp))
             field(account, { account = it }, "Account ID (base64)")
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                BigButton("Save account ID", { onSaveAccount(account) }, Modifier.weight(1f), ButtonKind.Primary, enabled = account.isNotBlank())
-                BigButton("Sign in with browser", onBrowserSignIn, Modifier.weight(1f))
+                BigButton("Sign in with your phone", onPhoneSignIn, Modifier.weight(1f), ButtonKind.Primary)
+                BigButton("Save account ID", { onSaveAccount(account) }, Modifier.weight(1f), enabled = account.isNotBlank())
             }
-            Spacer(Modifier.height(8.dp))
-            field(redirect, { redirect = it }, "After signing in, paste the address the browser ended on", KeyboardType.Uri)
-            Spacer(Modifier.height(8.dp))
-            BigButton("Finish sign-in", { onFinishSignIn(redirect) }, Modifier.fillMaxWidth(), enabled = redirect.isNotBlank())
             Spacer(Modifier.height(24.dp))
             SectionLabel("2 · Console")
         } else {
