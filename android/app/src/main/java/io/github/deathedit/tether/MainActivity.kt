@@ -157,6 +157,14 @@ class MainActivity : ComponentActivity() {
     // Controller on the home screen: left/right pick, A connect, Y rest,
     // X settings, B back.
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        // Off the home screen, A presses whatever has focus. Compose only
+        // clicks on Enter / d-pad centre (on release), so translate both
+        // press and release.
+        if (screen != Screen.Home && event.keyCode == KeyEvent.KEYCODE_BUTTON_A) {
+            return super.dispatchKeyEvent(
+                KeyEvent(event.downTime, event.eventTime, event.action, KeyEvent.KEYCODE_DPAD_CENTER, event.repeatCount, event.metaState),
+            )
+        }
         if (event.action != KeyEvent.ACTION_DOWN) return super.dispatchKeyEvent(event)
         if (screen != Screen.Home) {
             if (event.keyCode == KeyEvent.KEYCODE_BUTTON_B) {

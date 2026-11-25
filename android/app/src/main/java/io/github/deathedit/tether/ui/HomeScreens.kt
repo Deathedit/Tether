@@ -2,6 +2,8 @@ package io.github.deathedit.tether.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -198,7 +200,7 @@ private fun Page(title: String, onBack: () -> Unit, content: @Composable () -> U
         Modifier.fillMaxSize().background(Palette.background).verticalScroll(rememberScrollState()).padding(horizontal = 40.dp, vertical = 28.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("‹  Back", style = Type.body.copy(color = Palette.textMuted), modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onBack).padding(8.dp))
+            Text("‹  Back", style = Type.body.copy(color = Palette.textMuted), modifier = Modifier.clip(RoundedCornerShape(8.dp)).focusRing(RoundedCornerShape(8.dp)).clickable(onClick = onBack).padding(8.dp))
             Spacer(Modifier.width(16.dp))
             Text(title, style = Type.title)
         }
@@ -278,6 +280,7 @@ private fun <T> Choice(label: String, options: List<Pair<T, String>>, value: T, 
             Box(
                 Modifier.clip(RoundedCornerShape(10.dp))
                     .background(if (on) Palette.accent else Palette.surface)
+                    .focusRing(RoundedCornerShape(10.dp))
                     .clickable { onPick(v) }
                     .padding(horizontal = 16.dp, vertical = 10.dp),
             ) {
@@ -286,6 +289,31 @@ private fun <T> Choice(label: String, options: List<Pair<T, String>>, value: T, 
         }
     }
     Spacer(Modifier.height(16.dp))
+}
+
+/** A setting with a switch; the whole row takes focus and toggles. */
+@Composable
+private fun SwitchRow(title: String, detail: String?, checked: Boolean, onChange: (Boolean) -> Unit) {
+    val shape = RoundedCornerShape(12.dp)
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .focusRing(shape)
+            .toggleable(value = checked, role = Role.Switch, onValueChange = onChange)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = Type.body)
+            detail?.let { Text(it, style = Type.label) }
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = null,
+            colors = SwitchDefaults.colors(checkedTrackColor = Palette.accent, checkedThumbColor = Palette.onAccent),
+        )
+    }
 }
 
 /** Stream settings, account and the selected console. */
@@ -312,25 +340,10 @@ fun SettingsScreen(
         ) { resolution = it; settings.resolution = it }
         Choice("Frame rate", listOf(30 to "30 fps", 60 to "60 fps"), fps) { fps = it; settings.fps = it }
         Choice("Codec", listOf(VideoCodec.H264 to "H.264", VideoCodec.H265 to "HEVC"), codec) { codec = it; settings.codec = it }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Sound", style = Type.body, modifier = Modifier.weight(1f))
-            Switch(
-                checked = audio,
-                onCheckedChange = { audio = it; settings.audio = it },
-                colors = SwitchDefaults.colors(checkedTrackColor = Palette.accent, checkedThumbColor = Palette.onAccent),
-            )
-        }
+        SwitchRow("Sound", null, audio) { audio = it; settings.audio = it }
         Spacer(Modifier.height(8.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("Latency on the game screen", style = Type.body)
-                Text("Off: the top screen shows only the game.", style = Type.label)
-            }
-            Switch(
-                checked = overlay,
-                onCheckedChange = { overlay = it; settings.showOverlay = it },
-                colors = SwitchDefaults.colors(checkedTrackColor = Palette.accent, checkedThumbColor = Palette.onAccent),
-            )
+        SwitchRow("Latency on the game screen", "Off: the top screen shows only the game.", overlay) {
+            overlay = it; settings.showOverlay = it
         }
         Spacer(Modifier.height(24.dp))
         SectionLabel("Account")

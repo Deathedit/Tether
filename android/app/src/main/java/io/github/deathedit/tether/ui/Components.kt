@@ -21,6 +21,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.composed
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -35,6 +42,18 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+
+/**
+ * A clear ring around whatever has focus, so moving through the screen with
+ * a controller's d-pad shows where you are. Put it before `clickable`.
+ */
+fun Modifier.focusRing(shape: Shape = RoundedCornerShape(12.dp)): Modifier = composed {
+    var focused by remember { mutableStateOf(false) }
+    this
+        .onFocusChanged { focused = it.isFocused }
+        .border(if (focused) 3.dp else 0.dp, if (focused) Palette.accent else Color.Transparent, shape)
+        .background(if (focused) Palette.accent.copy(alpha = 0.12f) else Color.Transparent, shape)
+}
 
 @Composable
 fun StatusDot(color: Color, size: Int = 8) {
@@ -58,6 +77,7 @@ fun ConsoleCard(
             .clip(shape)
             .background(Palette.surface)
             .border(BorderStroke(if (selected) 2.dp else 0.dp, if (selected) Palette.accent else Color.Transparent), shape)
+            .focusRing(shape)
             .clickable(onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.SpaceBetween,
@@ -75,6 +95,7 @@ fun AddCard(onClick: () -> Unit, modifier: Modifier = Modifier) {
         modifier
             .height(76.dp)
             .clip(shape)
+            .focusRing(shape)
             .clickable(onClick = onClick)
             .dashedBorder(Palette.outline, 14f),
         contentAlignment = Alignment.CenterStart,
@@ -98,7 +119,7 @@ private fun Modifier.dashedBorder(color: Color, radiusDp: Float): Modifier = dra
 @Composable
 fun ButtonHint(letter: String, label: String, onClick: () -> Unit) {
     Row(
-        Modifier.clip(RoundedCornerShape(20.dp)).clickable(onClick = onClick).padding(end = 8.dp),
+        Modifier.clip(RoundedCornerShape(20.dp)).focusRing(RoundedCornerShape(20.dp)).clickable(onClick = onClick).padding(end = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
@@ -169,6 +190,7 @@ fun BigButton(
         modifier
             .clip(RoundedCornerShape(14.dp))
             .background(if (enabled) bg else bg.copy(alpha = 0.4f))
+            .focusRing(RoundedCornerShape(14.dp))
             .clickable(enabled = enabled, onClick = onClick)
             .padding(vertical = 14.dp),
         contentAlignment = Alignment.Center,
@@ -194,6 +216,7 @@ fun RowScope.ActionButton(
             .weight(1f)
             .clip(RoundedCornerShape(12.dp))
             .background(bg)
+            .focusRing(RoundedCornerShape(12.dp))
             .clickable(onClick = onClick)
             .padding(vertical = 10.dp),
         horizontalAlignment = Alignment.CenterHorizontally,

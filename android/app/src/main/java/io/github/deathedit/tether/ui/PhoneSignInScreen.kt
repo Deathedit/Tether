@@ -42,7 +42,7 @@ fun PhoneSignInScreen(state: PhoneSignIn.State?, onBack: () -> Unit) {
             Text(
                 "‹  Back",
                 style = Type.body.copy(color = Palette.textMuted),
-                modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onBack).padding(8.dp),
+                modifier = Modifier.clip(RoundedCornerShape(8.dp)).focusRing(RoundedCornerShape(8.dp)).clickable(onClick = onBack).padding(8.dp),
             )
             Spacer(Modifier.height(16.dp))
             Text("Sign in with your phone", style = Type.title)
