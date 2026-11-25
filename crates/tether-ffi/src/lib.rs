@@ -427,6 +427,12 @@ fn init_logging() {
                     .with(layer);
                 let _ = tracing::subscriber::set_global_default(subscriber);
             }
+            // Panic messages go to stderr, which Android discards; log them.
+            let default_hook = std::panic::take_hook();
+            std::panic::set_hook(Box::new(move |info| {
+                tracing::error!("panic: {info}");
+                default_hook(info);
+            }));
         });
     }
 }

@@ -6,6 +6,13 @@ import io.github.deathedit.tether.core.Tether
 /** Holds the one [Tether] (Rust core) for the whole app. */
 class TetherApplication : Application() {
     val core: Tether by lazy { Tether(filesDir.absolutePath, KeystoreStorage(this)) }
+
+    override fun onCreate() {
+        super.onCreate()
+        // Before any stream: the audio code reaches Android's AudioManager
+        // through this context.
+        NativeSurface.init(applicationContext)
+    }
 }
 
 val android.app.Activity.core: Tether

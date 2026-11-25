@@ -383,9 +383,21 @@ pub(crate) fn start(
         std::thread::Builder::new()
             .name("stream".into())
             .spawn(move || {
-                let (reason, error) = run(
-                    &paired, &secrets, account_id, &options, &ctl_rx, &live, &listener,
-                );
+                // A panic must still end the stream (and tell the app), not
+                // leave it waiting forever.
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    run(
+                        &paired, &secrets, account_id, &options, &ctl_rx, &live, &listener,
+                    )
+                }));
+                let (reason, error) = result.unwrap_or_else(|panic| {
+                    let msg = panic
+                        .downcast_ref::<&str>()
+                        .map(|s| s.to_string())
+                        .or_else(|| panic.downcast_ref::<String>().cloned())
+                        .unwrap_or_else(|| "unknown".into());
+                    (format!("Internal error: {msg}"), true)
+                });
                 listener.on_event(StreamEvent::Ended { reason, error });
             })?
     };
