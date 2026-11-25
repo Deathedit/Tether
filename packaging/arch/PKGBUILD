@@ -1,0 +1,70 @@
+# Maintainer: Deathedit <deathedit@users.noreply.github.com>
+#
+# Builds a tagged release from git. chiaki-ng and the four of its submodules
+# that its core library needs are separate sources, wired up in prepare().
+
+pkgname=tether
+pkgver=0.2.0
+pkgrel=1
+pkgdesc="Remote Play client (works with PS5), built on chiaki-ng"
+arch=('x86_64' 'aarch64')
+url="https://github.com/Deathedit/Tether"
+license=('AGPL-3.0-only')
+depends=(
+  'openssl' 'json-c' 'miniupnpc' 'libevent'  # chiaki-ng
+  'ffmpeg' 'libva'                           # video decoding (VAAPI)
+  'sdl3' 'systemd-libs'                      # controllers (libudev)
+  'alsa-lib'                                 # sound and microphone
+  'fontconfig' 'freetype2'                   # Slint text
+  'vulkan-icd-loader'                        # wgpu
+  'libxkbcommon' 'wayland' 'libx11' 'libxcursor' 'libxrandr' 'libxi'  # winit
+  'hicolor-icon-theme'
+)
+makedepends=('git' 'cargo' 'cmake' 'clang' 'protobuf' 'python-protobuf')
+# Static C libraries built with GCC LTO bytecode don't link into the Rust
+# binary; keep LTO to rustc's own.
+options=('!lto')
+source=(
+  "$pkgname::git+$url.git#tag=v$pkgver"
+  'chiaki-ng::git+https://github.com/streetpea/chiaki-ng.git'
+  'nanopb::git+https://github.com/nanopb/nanopb.git'
+  'jerasure::git+https://github.com/streetpea/jerasure.git'
+  'gf-complete::git+https://github.com/streetpea/gf-complete.git'
+  'curl::git+https://github.com/curl/curl.git'
+)
+sha256sums=('SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP')
+
+prepare() {
+  cd "$pkgname"
+  git submodule init third_party/chiaki-ng
+  git config submodule.third_party/chiaki-ng.url "$srcdir/chiaki-ng"
+  git -c protocol.file.allow=always submodule update third_party/chiaki-ng
+
+  cd third_party/chiaki-ng
+  local sub
+  for sub in nanopb jerasure gf-complete curl; do
+    git submodule init "third-party/$sub"
+    git config "submodule.third-party/$sub.url" "$srcdir/$sub"
+  done
+  git -c protocol.file.allow=always submodule update \
+    third-party/nanopb third-party/jerasure third-party/gf-complete third-party/curl
+  cd "$srcdir/$pkgname"
+
+  export RUSTUP_TOOLCHAIN=stable
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+  cd "$pkgname"
+  export RUSTUP_TOOLCHAIN=stable
+  export CARGO_TARGET_DIR=target
+  cargo build --frozen --release -p tether-desktop
+}
+
+package() {
+  cd "$pkgname"
+  install -Dm755 target/release/tether "$pkgdir/usr/bin/tether"
+  install -Dm644 packaging/linux/tether.desktop "$pkgdir/usr/share/applications/tether.desktop"
+  install -Dm644 packaging/linux/tether.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/tether.svg"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

@@ -23,6 +23,10 @@ CI, see [building](building.md#android)), tested on an AYN Thor with a PS5:
   Android Keystore.
 - Finds paired consoles on another subnet by asking them directly.
 
+Milestone 8 (ship): tagged releases build a Windows zip, a signed Android
+APK, an Arch package and the Nix package in CI; see
+[releases](building.md#releases).
+
 Run `tether` with no arguments to open the app: it lists the consoles on your
 network, links new ones (sign in once, then type the 8-digit code), wakes and
 connects, and has the stream settings. In a session, **Esc** opens the quick

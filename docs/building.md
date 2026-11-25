@@ -108,3 +108,70 @@ adb install android/app/build/outputs/apk/debug/app-debug.apk
 `build-rust.sh` writes `libtether_ffi.so` into `android/app/src/main/jniLibs/`
 and the generated Kotlin into `android/app/src/main/java/.../core/`; both are
 build outputs and not committed.
+
+## Releases
+
+`.github/workflows/release.yml` builds everything a release ships:
+
+| Target  | File                                   |
+|---------|----------------------------------------|
+| NixOS   | the flake's `tether` package (built as a check, not uploaded) |
+| Arch    | `tether-<version>-1-x86_64.pkg.tar.zst` |
+| Windows | `tether-<version>-windows-x86_64.zip`   |
+| Android | `tether-<version>-android.apk`          |
+
+### Installing
+
+- **NixOS**: `nix run github:Deathedit/Tether`, or add the flake as an input
+  and put `inputs.tether.packages.${system}.default` in
+  `environment.systemPackages`. Needs Nix 2.27 or newer (the flake fetches
+  the chiaki-ng submodule).
+- **Arch**: `sudo pacman -U tether-*.pkg.tar.zst` from the release, or build
+  it yourself with `makepkg -si` in `packaging/arch/`.
+- **Windows**: unzip and run `tether.exe`. It needs the Microsoft Visual C++
+  runtime, which most PCs already have (`winget install
+  Microsoft.VCRedist.2015+.x64` otherwise).
+- **Android**: install the APK. Release builds are signed with a different
+  key than CI's debug builds, so uninstall a debug build first (you'll have
+  to pair again).
+
+### Making a release
+
+1. Set the new version in `Cargo.toml` (`[workspace.package]`; the Android
+   app reads it from there) and `pkgver` in `packaging/arch/PKGBUILD`.
+2. Commit, then tag and push: `git tag v0.2.0 && git push origin v0.2.0`.
+3. The workflow checks that the tag matches the version, builds all targets
+   and creates a **draft** release with the files. Check it and publish it
+   on GitHub.
+
+To try the builds without releasing, run the workflow by hand (Actions >
+Release > Run workflow) on any branch. The files are then uploaded as
+workflow artifacts, and the APK is unsigned unless the key secrets exist.
+
+### Android release key
+
+The key that signs release APKs is yours: make it once, keep a backup, and
+never commit it. Every later release must be signed with the same key, or
+Android refuses to update the installed app.
+
+```
+keytool -genkeypair -v -keystore tether-release.jks -storetype PKCS12 \
+  -alias tether -keyalg RSA -keysize 4096 -validity 10000 -dname "CN=Tether"
+```
+
+(`keytool` comes with any JDK. A PKCS12 keystore uses one password for the
+store and the key.) Then add four repository secrets under Settings >
+Secrets and variables > Actions, or with `gh secret set`:
+
+| Secret                     | Value                                   |
+|----------------------------|-----------------------------------------|
+| `TETHER_KEYSTORE_BASE64`   | the keystore file, base64-encoded       |
+| `TETHER_KEYSTORE_PASSWORD` | the password                            |
+| `TETHER_KEY_ALIAS`         | `tether`                                |
+| `TETHER_KEY_PASSWORD`      | the password (same as above)            |
+
+To base64-encode it: `base64 -w0 tether-release.jks` on Linux, or in
+PowerShell `[Convert]::ToBase64String([IO.File]::ReadAllBytes("$PWD\tether-release.jks"))`.
+
+To sign a local build, set `TETHER_KEYSTORE` (the keystore's path) and the
+three other variables, then run `gradle --project-dir android assembleRelease`.
