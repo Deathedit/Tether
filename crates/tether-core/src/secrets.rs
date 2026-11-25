@@ -13,6 +13,8 @@ use rp_core::RegisteredConsole;
 
 use crate::config::write_atomic;
 
+/// Credential-store service name (desktop only; Android uses the file store).
+#[cfg(any(windows, target_os = "linux", target_os = "macos"))]
 const SERVICE: &str = "tether";
 
 /// The keys a console gave us when we registered.

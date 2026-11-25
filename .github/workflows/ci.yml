@@ -37,7 +37,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: recursive
+          submodules: true
+      # Only the chiaki-ng submodules lib/ needs. A full recursive checkout
+      # also pulls oboe, whose test app's gradle-wrapper.jar fails Gradle's
+      # wrapper validation (and we never use oboe).
+      - name: Check out chiaki-ng's library submodules
+        run: |
+          git -C third_party/chiaki-ng submodule update --init --depth 1 \
+            third-party/nanopb third-party/jerasure third-party/gf-complete third-party/curl
 
       - name: Install build tools
         run: |
