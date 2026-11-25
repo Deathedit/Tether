@@ -5,7 +5,7 @@ import io.github.deathedit.tether.core.Tether
 
 /** Holds the one [Tether] (Rust core) for the whole app. */
 class TetherApplication : Application() {
-    val core: Tether by lazy { Tether(filesDir.absolutePath) }
+    val core: Tether by lazy { Tether(filesDir.absolutePath, KeystoreStorage(this)) }
 }
 
 val android.app.Activity.core: Tether

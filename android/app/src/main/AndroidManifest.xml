@@ -6,6 +6,10 @@
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <!-- Console discovery uses UDP broadcast on the local network. -->
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <!-- Rumble on the device's motor when the controller has none. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- Voice chat through the console (asked for when the mic is turned on). -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <application
         android:name=".TetherApplication"

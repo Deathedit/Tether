@@ -20,6 +20,6 @@ pub use audio::{AudioError, AudioOptions, AudioPlayer, Microphone};
 pub use awake::{AwakeError, WakeProgress, ensure_awake};
 pub use config::{Config, PairedConsole};
 pub use haptics::HapticsRumble;
-pub use secrets::{ConsoleSecrets, SecretStore};
+pub use secrets::{ConsoleSecrets, SecretBackend, SecretStore};
 pub use settings::{DecoderPreference, LastSession, StreamSettings, VideoCodec, VideoResolution};
 pub use store::{Store, StoreError};

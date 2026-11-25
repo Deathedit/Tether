@@ -13,8 +13,7 @@ crate-type = ["cdylib", "lib"]
 [dependencies]
 crossbeam-channel.workspace = true
 rp-core.workspace = true
-# Audio arrives in milestone 7.
-tether-core = { workspace = true, default-features = false }
+tether-core.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 uniffi.workspace = true

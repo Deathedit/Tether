@@ -20,7 +20,8 @@ pub mod surface;
 mod video;
 
 pub use stream::{
-    StreamEvent, StreamHandle, StreamListener, StreamOptions, VideoCodec, VideoResolution,
+    ButtonBits, ControllerInput, StreamEvent, StreamHandle, StreamListener, StreamOptions,
+    StreamStats, VideoCodec, VideoResolution, button_bits,
 };
 
 uniffi::setup_scaffolding!();
@@ -93,13 +94,29 @@ pub struct Tether {
 #[uniffi::export]
 impl Tether {
     /// Opens (or creates) Tether's data in `data_dir`, normally the app's
-    /// `filesDir`. Pairing keys go to `secrets.toml` there, which only the
-    /// app can read; moving them into the Android Keystore is milestone 7.
+    /// `filesDir`. Pairing keys go to `storage` (Keystore-encrypted on
+    /// Android); keys an older version kept in `secrets.toml` move there.
+    /// Without `storage` they stay in `secrets.toml`.
     #[uniffi::constructor]
-    pub fn new(data_dir: String) -> Result<Arc<Self>, TetherError> {
+    pub fn new(
+        data_dir: String,
+        storage: Option<Arc<dyn SecureStorage>>,
+    ) -> Result<Arc<Self>, TetherError> {
         init_logging();
         let dir = std::path::PathBuf::from(data_dir);
-        let secrets = SecretStore::File(dir.join("secrets.toml"));
+        let file = dir.join("secrets.toml");
+        let secrets = match storage {
+            Some(storage) => {
+                let store = SecretStore::External(Arc::new(StorageBackend(storage)));
+                match store.import_file(&file) {
+                    Ok(0) => {}
+                    Ok(n) => tracing::info!("moved {n} console key(s) into secure storage"),
+                    Err(e) => tracing::warn!("could not move keys into secure storage: {e}"),
+                }
+                store
+            }
+            None => SecretStore::File(file),
+        };
         let store = Store::open(dir, secrets)?;
         Ok(Arc::new(Self {
             store: Mutex::new(store),
@@ -257,6 +274,35 @@ impl Tether {
             .ok_or_else(|| TetherError::msg("Set your PSN account ID first."))?;
         drop(store);
         stream::start(paired, secrets, account_id, options, listener)
+    }
+}
+
+/// Secret storage the app provides (Android: values encrypted with a
+/// Keystore key). Keys look like `console:<HOSTID>`.
+#[uniffi::export(with_foreign)]
+pub trait SecureStorage: Send + Sync {
+    fn get(&self, key: String) -> Option<String>;
+    /// Returns false if the value could not be stored.
+    fn put(&self, key: String, value: String) -> bool;
+    fn remove(&self, key: String);
+}
+
+struct StorageBackend(Arc<dyn SecureStorage>);
+
+impl tether_core::SecretBackend for StorageBackend {
+    fn get(&self, key: &str) -> Result<Option<String>, String> {
+        Ok(self.0.get(key.to_owned()))
+    }
+    fn set(&self, key: &str, value: &str) -> Result<(), String> {
+        if self.0.put(key.to_owned(), value.to_owned()) {
+            Ok(())
+        } else {
+            Err("secure storage refused the value".into())
+        }
+    }
+    fn delete(&self, key: &str) -> Result<(), String> {
+        self.0.remove(key.to_owned());
+        Ok(())
     }
 }
 
