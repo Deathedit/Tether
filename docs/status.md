@@ -3,9 +3,12 @@
 Milestones 1 (discover), 2 (pair), 3 (first picture), 4 (play) and 5 (desktop
 UI): sound, controllers and rumble, in the desktop app.
 
-Milestone 6 (Android core) is in progress: a bare Android app that pairs,
-wakes and streams video (hardware-decoded with MediaCodec, drawn straight onto
-the screen). No sound, controller input or designed screens yet (milestone 7).
+Milestone 6 (Android core): a bare Android app (APK from CI, see
+[building](building.md#android)) that pairs, wakes and streams video,
+hardware-decoded with MediaCodec and drawn straight onto the screen. Tested on
+a PS5. No sound, controller input or designed screens yet (milestone 7), and
+pairing keys sit in a file only the app can read until they move into the
+Android Keystore.
 
 Run `tether` with no arguments to open the app: it lists the consoles on your
 network, links new ones (sign in once, then type the 8-digit code), wakes and
