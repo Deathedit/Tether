@@ -25,17 +25,18 @@ pub use stream::{
 
 uniffi::setup_scaffolding!();
 
+/// Errors reach Kotlin as `TetherException.Failed`, whose `message` is the
+/// text below (a "flat" error: no fields that could clash with Throwable's).
 #[derive(Debug, thiserror::Error, uniffi::Error)]
+#[uniffi(flat_error)]
 pub enum TetherError {
-    #[error("{message}")]
-    Failed { message: String },
+    #[error("{0}")]
+    Failed(String),
 }
 
 impl TetherError {
     pub(crate) fn msg(message: impl Into<String>) -> Self {
-        Self::Failed {
-            message: message.into(),
-        }
+        Self::Failed(message.into())
     }
 }
 
