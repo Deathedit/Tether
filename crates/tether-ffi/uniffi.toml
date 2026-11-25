@@ -1,0 +1,3 @@
+[bindings.kotlin]
+package_name = "io.github.deathedit.tether.core"
+cdylib_name = "tether_ffi"

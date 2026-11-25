@@ -11,4 +11,10 @@ crates/tether-core/      app logic: config, paired consoles, secrets, stream
 crates/desktop/          the `tether` binary: Slint UI (ui/*.slint), CLI,
                          FFmpeg decoding (hardware or software), wgpu renderer,
                          SDL3 controllers and rumble
+crates/tether-ffi/       the Android app's Rust core (libtether_ffi.so): UniFFI
+                         API for Kotlin, MediaCodec decoder drawing straight
+                         onto the SurfaceView, JNI hand-off of the surface
+crates/uniffi-bindgen/   generates tether-ffi's Kotlin bindings from the .so
+android/                 Gradle project: Kotlin app (bare screens for now;
+                         Compose UI in milestone 7), build-rust.sh
 ```

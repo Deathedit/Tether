@@ -1,0 +1,10 @@
+# Gradle
+.gradle/
+build/
+local.properties
+.idea/
+*.iml
+
+# Produced by build-rust.sh
+app/src/main/jniLibs/
+app/src/main/java/io/github/deathedit/tether/core/

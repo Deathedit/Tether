@@ -6,6 +6,7 @@
 //! ([`ensure_awake`]), session audio ([`AudioPlayer`], [`Microphone`]) and
 //! haptics-to-rumble ([`HapticsRumble`]). Stats come later.
 
+#[cfg(feature = "audio")]
 pub mod audio;
 pub mod awake;
 pub mod config;
@@ -14,6 +15,7 @@ pub mod secrets;
 pub mod settings;
 mod store;
 
+#[cfg(feature = "audio")]
 pub use audio::{AudioError, AudioOptions, AudioPlayer, Microphone};
 pub use awake::{AwakeError, WakeProgress, ensure_awake};
 pub use config::{Config, PairedConsole};

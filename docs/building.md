@@ -83,3 +83,28 @@ PATH or in the LLVM and Visual Studio folders; override with `CLANG_CL`,
 
 If CMake picks the wrong Python or `protoc`, set the `PYTHON` or `PROTOC`
 environment variables to the full paths.
+
+## Android
+
+The APK is built on a Linux (or macOS) machine: chiaki-ng builds OpenSSL for
+Android with OpenSSL's own `Configure` script and `make`. CI builds a
+debug-signed APK on every push (the `tether-android-debug` artifact), which
+installs directly on a phone or the AYN Thor.
+
+To build it yourself you need, besides the Linux build tools above:
+
+- JDK 17, the Android SDK (platform 35) and the NDK (`ndk;28.2.13676358`),
+  with `ANDROID_NDK_HOME` pointing at the NDK
+- the Rust targets: `rustup target add aarch64-linux-android x86_64-linux-android`
+- `cargo install cargo-ndk`
+- Gradle 8.14
+
+```
+sh android/build-rust.sh                # Rust core (.so) + Kotlin bindings
+gradle --project-dir android assembleDebug
+adb install android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+`build-rust.sh` writes `libtether_ffi.so` into `android/app/src/main/jniLibs/`
+and the generated Kotlin into `android/app/src/main/java/.../core/`; both are
+build outputs and not committed.

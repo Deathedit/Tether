@@ -1,6 +1,13 @@
 [workspace]
 resolver = "3"
-members = ["crates/chiaki-sys", "crates/rp-core", "crates/tether-core", "crates/desktop"]
+members = [
+    "crates/chiaki-sys",
+    "crates/rp-core",
+    "crates/tether-core",
+    "crates/tether-ffi",
+    "crates/uniffi-bindgen",
+    "crates/desktop",
+]
 
 [workspace.package]
 version = "0.1.0"
@@ -35,6 +42,11 @@ thiserror = "2"
 toml = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# Android (tether-ffi)
+jni-sys = "0.3"
+ndk = { version = "0.9", features = ["media", "api-level-30"] }
+tracing-android = "0.2"
+uniffi = "0.32"
 ureq = { version = "3", features = ["json"] }
 url = "2"
 

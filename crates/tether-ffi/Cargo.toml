@@ -1,0 +1,26 @@
+[package]
+name = "tether-ffi"
+description = "Tether's API for the Android app (UniFFI → Kotlin), plus the MediaCodec video decoder"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+# cdylib: libtether_ffi.so for the Android app; lib: for tests.
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+crossbeam-channel.workspace = true
+rp-core.workspace = true
+# Audio arrives in milestone 7.
+tether-core = { workspace = true, default-features = false }
+thiserror.workspace = true
+tracing.workspace = true
+uniffi.workspace = true
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni-sys.workspace = true
+ndk.workspace = true
+tracing-android.workspace = true
+tracing-subscriber.workspace = true

@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, "milestone-*"]
   pull_request:
 
 env:
@@ -28,6 +28,68 @@ jobs:
       - run: nix develop --command cargo clippy --workspace --all-targets -- -D warnings
       - run: nix develop --command cargo test --workspace
       - run: nix develop --command cargo build --release -p tether-desktop
+
+  android:
+    name: Android APK
+    runs-on: ubuntu-24.04
+    env:
+      NDK_VERSION: 28.2.13676358
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      # Only the chiaki-ng submodules lib/ needs. A full recursive checkout
+      # also pulls oboe, whose test app's gradle-wrapper.jar fails Gradle's
+      # wrapper validation (and we never use oboe).
+      - name: Check out chiaki-ng's library submodules
+        run: |
+          git -C third_party/chiaki-ng submodule update --init --depth 1 \
+            third-party/nanopb third-party/jerasure third-party/gf-complete third-party/curl
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          # nanopb's generator (protoc + Python protobuf) and libclang for
+          # bindgen. CMake, perl and make (for OpenSSL) are on the runner.
+          sudo apt-get install -y --no-install-recommends \
+            protobuf-compiler python3-protobuf libclang-dev
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      # The runner image ships the Android SDK (ANDROID_SDK_ROOT) with its
+      # command-line tools; add the platform and NDK version we build with.
+      - name: Install Android SDK platform and NDK
+        run: |
+          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" \
+            "platforms;android-35" "build-tools;35.0.0" "ndk;$NDK_VERSION"
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+          # The image sets this to its default NDK; keep both on ours.
+          echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android, x86_64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: android
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
+
+      - name: Build the Rust core and Kotlin bindings
+        run: sh android/build-rust.sh
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.14.3"
+      - name: Build the APK
+        run: gradle --project-dir android assembleDebug
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tether-android-debug
+          path: android/app/build/outputs/apk/debug/app-debug.apk
 
   windows:
     name: Windows build + tests
